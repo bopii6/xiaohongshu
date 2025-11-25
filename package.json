@@ -7,8 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "pages:build": "npx opennextjs-cloudflare build && node scripts/copy-worker.mjs",
-    "pages:preview": "wrangler dev"
+    "pages:build": "npx opennextjs-cloudflare build --config wrangler.build.jsonc && node scripts/copy-worker.mjs",
+    "pages:preview": "wrangler dev --config wrangler.build.jsonc"
   },
   "dependencies": {
     "@types/multer": "^2.0.0",

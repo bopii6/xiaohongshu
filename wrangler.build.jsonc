@@ -3,5 +3,9 @@
   "name": "xiaohongshu",
   "compatibility_date": "2024-11-25",
   "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
-  "pages_build_output_dir": ".open-next/assets"
+  "assets": {
+    "directory": ".open-next/assets",
+    "binding": "OPENNEXT_ASSETS",
+    "run_worker_first": true
+  }
 }
