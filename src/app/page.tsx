@@ -1,65 +1,123 @@
-import Image from "next/image";
+'use client';
+
+import Link from 'next/link';
 
 export default function Home() {
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex min-h-screen w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+    <div className="min-h-screen bg-[#F8F8F8] pb-24 font-sans text-[#333]">
+      {/* Header */}
+      <header className="fixed top-0 left-0 right-0 bg-white z-50 px-6 py-4 shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
+        <h1 className="text-xl font-bold tracking-tight text-[#FF2442]">RedNote</h1>
+      </header>
+
+      <main className="pt-24 px-6 max-w-md mx-auto">
+        {/* Hero */}
+        <div className="mb-10 animate-slide-up">
+          <h2 className="text-2xl font-bold mb-2 text-[#333]">👋 欢迎回来</h2>
+          <p className="text-[#999] text-sm">今天想创作什么内容？</p>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+
+        {/* Entry Cards */}
+        <div className="space-y-6 animate-slide-up" style={{ animationDelay: '0.1s' }}>
+          {/* Business Card */}
+          <Link href="/create?type=business" className="block group">
+            <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 transition-all active:scale-95 active:bg-gray-50 relative overflow-hidden">
+              <div className="absolute right-0 top-0 w-32 h-32 bg-red-50 rounded-full translate-x-10 -translate-y-10 opacity-50" />
+
+              <div className="relative z-10 flex items-start justify-between mb-4">
+                <div className="w-14 h-14 rounded-2xl bg-red-50 flex items-center justify-center text-3xl shadow-sm">
+                  🛍️
+                </div>
+                <div className="w-8 h-8 rounded-full bg-gray-50 flex items-center justify-center text-gray-300 group-hover:bg-red-50 group-hover:text-red-500 transition-colors">
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7" /></svg>
+                </div>
+              </div>
+              <h3 className="relative z-10 text-xl font-bold mb-2 text-[#333]">商家推广</h3>
+              <p className="relative z-10 text-[#666] text-sm leading-relaxed">
+                专为电商/实体店设计。一键生成种草文案、探店笔记，提升转化率。
+              </p>
+            </div>
+          </Link>
+
+          {/* IP Card */}
+          <Link href="/create?type=ip" className="block group">
+            <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 transition-all active:scale-95 active:bg-gray-50 relative overflow-hidden">
+              <div className="absolute right-0 top-0 w-32 h-32 bg-purple-50 rounded-full translate-x-10 -translate-y-10 opacity-50" />
+
+              <div className="relative z-10 flex items-start justify-between mb-4">
+                <div className="w-14 h-14 rounded-2xl bg-purple-50 flex items-center justify-center text-3xl shadow-sm">
+                  ✨
+                </div>
+                <div className="w-8 h-8 rounded-full bg-gray-50 flex items-center justify-center text-gray-300 group-hover:bg-purple-50 group-hover:text-purple-500 transition-colors">
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7" /></svg>
+                </div>
+              </div>
+              <h3 className="relative z-10 text-xl font-bold mb-2 text-[#333]">个人 IP</h3>
+              <p className="relative z-10 text-[#666] text-sm leading-relaxed">
+                打造个人品牌。辅助选题、润色文案，保持高质量持续输出。
+              </p>
+            </div>
+          </Link>
+
+          {/* Title Lab Card */}
+          <Link href="/title-lab" className="block group">
+            <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 transition-all active:scale-95 active:bg-gray-50 relative overflow-hidden">
+              <div className="absolute right-0 top-0 w-32 h-32 bg-orange-50 rounded-full translate-x-10 -translate-y-10 opacity-50" />
+
+              <div className="relative z-10 flex items-start justify-between mb-4">
+                <div className="w-14 h-14 rounded-2xl bg-orange-50 flex items-center justify-center text-3xl shadow-sm">
+                  🧪
+                </div>
+                <div className="w-8 h-8 rounded-full bg-gray-50 flex items-center justify-center text-gray-300 group-hover:bg-orange-50 group-hover:text-orange-500 transition-colors">
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7" /></svg>
+                </div>
+              </div>
+              <h3 className="relative z-10 text-xl font-bold mb-2 text-[#333]">爆款标题</h3>
+              <p className="relative z-10 text-[#666] text-sm leading-relaxed">
+                起标题太难？输入话题，一键生成悬念、干货、情绪等 4 类爆款标题。
+              </p>
+            </div>
+          </Link>
+
+          {/* Rewrite Card */}
+          <Link href="/rewrite" className="block group">
+            <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 transition-all active:scale-95 active:bg-gray-50 relative overflow-hidden">
+              <div className="absolute right-0 top-0 w-32 h-32 bg-green-50 rounded-full translate-x-10 -translate-y-10 opacity-50" />
+
+              <div className="relative z-10 flex items-start justify-between mb-4">
+                <div className="w-14 h-14 rounded-2xl bg-green-50 flex items-center justify-center text-3xl shadow-sm">
+                  🔄
+                </div>
+                <div className="w-8 h-8 rounded-full bg-gray-50 flex items-center justify-center text-gray-300 group-hover:bg-green-50 group-hover:text-green-500 transition-colors">
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7" /></svg>
+                </div>
+              </div>
+              <h3 className="relative z-10 text-xl font-bold mb-2 text-[#333]">爆款&quot;洗稿&quot;/仿写</h3>
+              <p className="relative z-10 text-[#666] text-sm leading-relaxed">
+                跟着爆款发，流量差不了
+              </p>
+            </div>
+          </Link>
         </div>
       </main>
+
+      {/* Bottom Nav */}
+      <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-100 pb-[env(safe-area-inset-bottom)] z-50">
+        <div className="flex justify-around items-center h-16">
+          <Link href="/" className="flex flex-col items-center space-y-1 text-[#333]">
+            <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2L2 12h3v8h6v-6h2v6h6v-8h3L12 2z" /></svg>
+            <span className="text-[10px] font-medium">首页</span>
+          </Link>
+          <Link href="/templates" className="flex flex-col items-center space-y-1 text-[#999]">
+            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" /></svg>
+            <span className="text-[10px] font-medium">模板</span>
+          </Link>
+          <Link href="/history" className="flex flex-col items-center space-y-1 text-[#999]">
+            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
+            <span className="text-[10px] font-medium">我的</span>
+          </Link>
+        </div>
+      </div>
     </div>
   );
 }
