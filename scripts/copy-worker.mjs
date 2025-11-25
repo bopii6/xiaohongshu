@@ -1,4 +1,4 @@
-import { existsSync, copyFileSync, mkdirSync, cpSync } from 'node:fs';
+import { existsSync, copyFileSync, mkdirSync, cpSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
 const root = process.cwd();
@@ -37,3 +37,12 @@ for (const relativeDir of supportDirs) {
   cpSync(source, destination, { recursive: true });
   console.log(`Copied .open-next/${relativeDir} -> .open-next/assets/${relativeDir}`);
 }
+
+// Patch worker to fall back to __STATIC_CONTENT binding on Cloudflare Pages.
+const workerCode = readFileSync(targetPath, 'utf8');
+const patchedCode = workerCode.replace(
+  'async fetch(request, env, ctx) {',
+  'async fetch(request, env, ctx) {\n        if (!env.ASSETS && env.__STATIC_CONTENT) {\n            env.ASSETS = env.__STATIC_CONTENT;\n        }'
+);
+writeFileSync(targetPath, patchedCode, 'utf8');
+console.log('Patched _worker.js to use __STATIC_CONTENT fallback for assets.');
