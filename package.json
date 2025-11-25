@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "pages:build": "npx opennextjs-cloudflare build",
+    "pages:build": "npx opennextjs-cloudflare build && node scripts/copy-worker.mjs",
     "pages:preview": "wrangler dev"
   },
   "dependencies": {
