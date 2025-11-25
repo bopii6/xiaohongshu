@@ -1,10 +1,16 @@
-import { existsSync, copyFileSync, mkdirSync } from 'node:fs';
+import { existsSync, copyFileSync, mkdirSync, cpSync } from 'node:fs';
 import path from 'node:path';
 
 const root = process.cwd();
 const workerPath = path.join(root, '.open-next', 'worker.js');
 const assetsDir = path.join(root, '.open-next', 'assets');
 const targetPath = path.join(assetsDir, '_worker.js');
+const supportDirs = [
+  'cloudflare',
+  'middleware',
+  path.join('.build', 'durable-objects'),
+  'server-functions',
+];
 
 if (!existsSync(workerPath)) {
   console.error('OpenNext worker.js not found. Did the build step run successfully?');
@@ -17,3 +23,17 @@ if (!existsSync(assetsDir)) {
 
 copyFileSync(workerPath, targetPath);
 console.log('Copied .open-next/worker.js -> .open-next/assets/_worker.js');
+
+for (const relativeDir of supportDirs) {
+  const source = path.join(root, '.open-next', relativeDir);
+  const destination = path.join(assetsDir, relativeDir);
+
+  if (!existsSync(source)) {
+    console.warn(`Warning: ${relativeDir} not found under .open-next, skipping copy.`);
+    continue;
+  }
+
+  mkdirSync(path.dirname(destination), { recursive: true });
+  cpSync(source, destination, { recursive: true });
+  console.log(`Copied .open-next/${relativeDir} -> .open-next/assets/${relativeDir}`);
+}
