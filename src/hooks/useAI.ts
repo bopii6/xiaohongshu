@@ -20,10 +20,10 @@ export function useAI(options: UseAIOptions = {}) {
     setError(null);
 
     try {
-      const response = await aiClient.generateText({
-        ...request,
-        provider: provider || request.provider
-      });
+      const payload: AIRequest & { provider?: string } = provider
+        ? { ...request, provider }
+        : request;
+      const response = await aiClient.generateText(payload);
       setLoading(false);
       return response;
     } catch (err) {
@@ -40,10 +40,10 @@ export function useAI(options: UseAIOptions = {}) {
     setError(null);
 
     try {
-      const result = await aiClient.rewriteContent({
-        ...request,
-        provider: provider || request.provider
-      });
+      const payload: ContentRewriteRequest & { provider?: string } = provider
+        ? { ...request, provider }
+        : request;
+      const result = await aiClient.rewriteContent(payload);
       setLoading(false);
       return result;
     } catch (err) {
@@ -60,10 +60,10 @@ export function useAI(options: UseAIOptions = {}) {
     setError(null);
 
     try {
-      const result = await aiClient.generateContent({
-        ...request,
-        provider: provider || request.provider
-      });
+      const payload: ContentGenerationRequest & { provider?: string } = provider
+        ? { ...request, provider }
+        : request;
+      const result = await aiClient.generateContent(payload);
       setLoading(false);
       return result;
     } catch (err) {
@@ -83,11 +83,12 @@ export function useAI(options: UseAIOptions = {}) {
     setLoading(true);
     setError(null);
 
+    const payload: AIRequest & { provider?: string } = provider
+      ? { ...request, provider }
+      : request;
+
     generateWithStreaming(
-      {
-        ...request,
-        provider: provider || request.provider
-      },
+      payload,
       onChunk,
       (fullText) => {
         setLoading(false);

@@ -211,7 +211,7 @@ export class HunyuanClient {
     console.log(`[模型调用] 腾讯混元 - ${model}`, {
       timestamp: new Date().toISOString(),
       model,
-      messageCount: params.Messages?.length,
+      messageCount: Array.isArray(params.Messages) ? params.Messages.length : 0,
       temperature: params.Temperature,
       topP: params.TopP,
       stream: params.Stream
@@ -264,7 +264,7 @@ export class HunyuanClient {
     console.log(`[模型调用] 腾讯混元流式 - ${model}`, {
       timestamp: new Date().toISOString(),
       model,
-      messageCount: params.Messages?.length,
+      messageCount: Array.isArray(params.Messages) ? params.Messages.length : 0,
       temperature: params.Temperature,
       topP: params.TopP,
       stream: true

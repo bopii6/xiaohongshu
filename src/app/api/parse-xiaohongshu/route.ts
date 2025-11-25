@@ -146,7 +146,7 @@ async function tryJinaAI(url: string): Promise<FetchContentResult> {
 
 // 方法2: 多User-Agent直接请求
 async function tryDirectRequest(url: string): Promise<FetchContentResult> {
-  const headersConfigs = [
+  const headersConfigs: Record<string, string>[] = [
     {
       'User-Agent': getRandomUserAgent(),
       'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
@@ -622,7 +622,7 @@ async function parseXiaohongshuUrl(input: string): Promise<ParseResult> {
           };
         } else {
           console.log(`❌ ${method.name} 失败:`, result.error);
-          lastError = result.error;
+          lastError = result.error ?? lastError;
         }
       } catch (error: unknown) {
         const message = getErrorMessage(error);

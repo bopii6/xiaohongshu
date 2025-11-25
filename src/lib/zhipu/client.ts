@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import { ZhipuConfig } from './config';
 
-export interface ZhipuChatParams {
+export interface ZhipuChatParams extends Record<string, unknown> {
     model: string;
     messages: Array<{
         role: 'user' | 'assistant' | 'system';
