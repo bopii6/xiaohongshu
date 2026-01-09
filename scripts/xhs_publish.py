@@ -343,6 +343,13 @@ async def try_file_chooser_upload(page, selectors, media_files):
 
 async def perform_upload(page, media_files, note_type):
     timeout_seconds = 25 if note_type == "video" else 15
+    if note_type == "video":
+        try:
+            await page.wait_for_selector("input.upload-input", timeout=timeout_seconds * 1000)
+            await page.set_input_files("input.upload-input", media_files[0])
+            return True
+        except Exception:
+            pass
     file_input_info = await wait_for_file_input(page, note_type, timeout_seconds=timeout_seconds)
     if file_input_info:
         file_input, accept_value, is_multiple = file_input_info
