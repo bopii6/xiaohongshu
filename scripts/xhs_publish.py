@@ -1,4 +1,5 @@
 import argparse
+import asyncio
 import json
 import os
 import re
@@ -17,9 +18,21 @@ DEFAULT_UA = (
     "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 )
 
+DEFAULT_DOWNLOAD_CONCURRENCY = 3
+
 
 def log_step(message):
     print(f"PUBLISH_STEP: {message}", file=sys.stderr)
+
+
+def get_download_concurrency():
+    raw = os.environ.get("XHS_DOWNLOAD_CONCURRENCY", "").strip()
+    if not raw:
+        return DEFAULT_DOWNLOAD_CONCURRENCY
+    try:
+        return max(1, int(raw))
+    except ValueError:
+        return DEFAULT_DOWNLOAD_CONCURRENCY
 
 
 def parse_args():
@@ -109,6 +122,30 @@ async def download_with_context(context, url, dest_path, referer=None, cookie=No
         raise RuntimeError(f"download failed {status} for {url}")
     body = await response.body()
     Path(dest_path).write_bytes(body)
+
+
+async def download_media_files(context, media_requests, download_dir, source_url, cookie):
+    concurrency = get_download_concurrency()
+    semaphore = asyncio.Semaphore(concurrency)
+
+    async def download_one(kind, url, filename):
+        dest_path = Path(download_dir) / filename
+        async with semaphore:
+            if kind == "video":
+                await asyncio.to_thread(download_file, url, dest_path, referer=source_url, cookie=cookie)
+            else:
+                try:
+                    await download_with_context(context, url, dest_path, referer=source_url, cookie=cookie)
+                except Exception as exc:
+                    print(f"PUBLISH_WARN: context download failed for {url} ({exc}), fallback to urllib", file=sys.stderr)
+                    await asyncio.to_thread(download_file, url, dest_path, referer=source_url, cookie=cookie)
+        return str(dest_path)
+
+    tasks = [
+        download_one(kind, url, filename)
+        for kind, url, filename in media_requests
+    ]
+    return await asyncio.gather(*tasks)
 
 
 def normalize_tags(tags):
@@ -710,31 +747,22 @@ async def publish(payload):
         await context.add_cookies(parse_cookie(cookie))
 
         log_step(f"download media count={len(media_requests)}")
-        media_files = []
-        for kind, url, filename in media_requests:
-            dest_path = download_dir / filename
-            if kind == "video":
-                download_file(url, dest_path, referer=source_url, cookie=cookie)
-            else:
-                try:
-                    await download_with_context(context, url, dest_path, referer=source_url, cookie=cookie)
-                except Exception as exc:
-                    print(f"PUBLISH_WARN: context download failed for {url} ({exc}), fallback to urllib", file=sys.stderr)
-                    download_file(url, dest_path, referer=source_url, cookie=cookie)
-            media_files.append(str(dest_path))
-        log_step("download complete")
+        download_start = time.perf_counter()
+        media_files = await download_media_files(context, media_requests, download_dir, source_url, cookie)
+        log_step(f"download complete in {time.perf_counter() - download_start:.1f}s")
 
         page = await context.new_page()
         target = "video" if note_type == "video" else "note"
         publish_url = f"https://creator.xiaohongshu.com/publish/publish?from=homepage&target={target}"
         log_step(f"open publish page target={target}")
+        page_start = time.perf_counter()
         await page.goto(publish_url, wait_until="domcontentloaded")
         try:
             await page.wait_for_load_state("networkidle", timeout=10000)
         except Exception:
             pass
         await page.wait_for_timeout(2000)
-        log_step("publish page loaded")
+        log_step(f"publish page loaded in {time.perf_counter() - page_start:.1f}s")
         if "login" in page.url or await page.locator("text=手机号登录").count():
             raise RuntimeError("cookie invalid or expired for creator platform")
         if "/new/home" in page.url or "/home" in page.url:
@@ -763,7 +791,9 @@ async def publish(payload):
 
         # Upload media
         log_step("uploading media")
+        upload_start = time.perf_counter()
         uploaded = await perform_upload(page, media_files, note_type)
+        log_step(f"upload attempt done in {time.perf_counter() - upload_start:.1f}s")
         if not uploaded:
             fallback_url = f"https://creator.xiaohongshu.com/publish/publish?from=menu&target={target}"
             if page.url != fallback_url:
@@ -795,7 +825,9 @@ async def publish(payload):
                         await page.wait_for_timeout(1500)
                     log_step("ensure note tab (retry)")
                     await ensure_note_tab(page)
+                upload_start = time.perf_counter()
                 uploaded = await perform_upload(page, media_files, note_type)
+                log_step(f"upload retry done in {time.perf_counter() - upload_start:.1f}s")
 
         if not uploaded:
             html_path, png_path = await dump_publish_debug(page, base_dir)
@@ -841,11 +873,16 @@ async def publish(payload):
             raise RuntimeError("publish button not found")
 
         log_step("wait for publish result")
+        publish_start = time.perf_counter()
         published = await wait_for_publish_result(page, timeout_seconds=90)
         if not published:
             html_path, png_path = await dump_publish_debug(page, base_dir)
-            raise RuntimeError(f"publish result timeout; html={html_path}; screenshot={png_path}")
-        log_step("publish success")
+            raise RuntimeError(
+                "publish result timeout after "
+                f"{time.perf_counter() - publish_start:.1f}s; "
+                f"html={html_path}; screenshot={png_path}"
+            )
+        log_step(f"publish success in {time.perf_counter() - publish_start:.1f}s")
 
         await context.close()
         await browser.close()
