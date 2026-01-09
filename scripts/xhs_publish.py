@@ -342,25 +342,39 @@ async def try_file_chooser_upload(page, selectors, media_files):
 
 
 async def perform_upload(page, media_files, note_type):
-    timeout_seconds = 25 if note_type == "video" else 15
+    timeout_seconds = 60 if note_type == "video" else 20
     if note_type == "video":
-        try:
-            await page.wait_for_function(
-                "() => !!document.querySelector('input.upload-input')",
-                timeout=timeout_seconds * 1000
-            )
-            handle = await page.query_selector("input.upload-input")
-            if handle:
-                await handle.set_input_files(media_files[0])
-                return True
-        except Exception as exc:
+        selectors = [
+            "#creator-publish-dom input.upload-input",
+            "input.upload-input"
+        ]
+        last_exc = None
+        for selector in selectors:
             try:
-                count = await page.evaluate("document.querySelectorAll('input[type=file]').length")
-                print(f"PUBLISH_DEBUG: file input count in DOM={count}", file=sys.stderr)
-            except Exception:
-                pass
-            print(f"PUBLISH_WARN: direct upload-input failed: {exc}", file=sys.stderr)
+                handle = await page.wait_for_selector(selector, state="attached", timeout=timeout_seconds * 1000)
+                if handle:
+                    await handle.set_input_files(media_files[0])
+                    return True
+            except Exception as exc:
+                last_exc = exc
+                continue
+        for frame in page.frames:
+            for selector in selectors:
+                try:
+                    handle = await frame.wait_for_selector(selector, state="attached", timeout=timeout_seconds * 1000)
+                    if handle:
+                        await handle.set_input_files(media_files[0])
+                        return True
+                except Exception as exc:
+                    last_exc = exc
+                    continue
+        try:
+            count = await page.evaluate("document.querySelectorAll('input[type=file]').length")
+            print(f"PUBLISH_DEBUG: file input count in DOM={count}", file=sys.stderr)
+        except Exception:
             pass
+        if last_exc:
+            print(f"PUBLISH_WARN: direct upload-input failed: {last_exc}", file=sys.stderr)
     file_input_info = await wait_for_file_input(page, note_type, timeout_seconds=timeout_seconds)
     if file_input_info:
         file_input, accept_value, is_multiple = file_input_info
