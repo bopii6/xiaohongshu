@@ -58,6 +58,12 @@ function normalizeImageUrl(url: string): string {
   if (trimmed.startsWith('//')) {
     return `https:${trimmed}`;
   }
+  if (trimmed.startsWith('http://')) {
+    const httpsCandidate = `https://${trimmed.slice(7)}`;
+    if (/xiaohongshu|xhscdn/i.test(httpsCandidate)) {
+      return httpsCandidate;
+    }
+  }
   return trimmed;
 }
 

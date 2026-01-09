@@ -259,6 +259,14 @@ export default function RewritePage() {
     };
   };
 
+  const getProxyImageUrl = (url: string) => {
+    const params = new URLSearchParams({ url });
+    if (parsedNote?.sourceUrl) {
+      params.set('referer', parsedNote.sourceUrl);
+    }
+    return `/api/xhs/image?${params.toString()}`;
+  };
+
   const reset = () => {
     rewriteAbortRef.current?.abort();
     rewriteAbortRef.current = null;
@@ -346,7 +354,7 @@ export default function RewritePage() {
                   {parsedNote.images.slice(0, 4).map((img, i) => (
                     <div key={i} className="w-20 h-20 flex-shrink-0 rounded-lg overflow-hidden bg-gray-100">
                       <Image
-                        src={img}
+                        src={getProxyImageUrl(img)}
                         alt={`图片${i + 1}`}
                         width={80}
                         height={80}

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { spawn } from 'child_process';
+import { createWriteStream } from 'fs';
 import { mkdir, unlink, writeFile } from 'fs/promises';
 import path from 'path';
 
@@ -64,6 +65,48 @@ export async function POST(request: NextRequest) {
     const scriptPath = path.join(process.cwd(), 'scripts', 'xhs_publish.py');
     const args = [scriptPath, '--payload', payloadPath];
     const timeoutMs = Number.parseInt(process.env.XHS_PUBLISH_TIMEOUT_MS || '', 10) || DEFAULT_TIMEOUT_MS;
+    const runAsync = process.env.XHS_PUBLISH_ASYNC === 'true';
+
+    if (runAsync) {
+      const jobId = `xhs_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      const logPath = path.join(workDir, `${jobId}.log`);
+      const logStream = createWriteStream(logPath, { flags: 'a' });
+      const child = spawn(python, args, {
+        cwd: process.cwd(),
+        env: { ...process.env },
+        windowsHide: true
+      });
+
+      console.log('[XHS publish] queued', { jobId, logPath });
+
+      child.stdout.on('data', chunk => {
+        const text = chunk.toString();
+        logStream.write(text);
+        console.log('[XHS publish] stdout', text.trim());
+      });
+      child.stderr.on('data', chunk => {
+        const text = chunk.toString();
+        logStream.write(text);
+        console.error('[XHS publish] stderr', text.trim());
+      });
+      child.on('error', err => {
+        console.error('[XHS publish] spawn error', err);
+        logStream.write(`spawn error: ${String(err)}\n`);
+        logStream.end();
+        unlink(payloadPath).catch(() => undefined);
+      });
+      child.on('close', code => {
+        logStream.write(`exit code: ${code ?? 1}\n`);
+        logStream.end();
+        unlink(payloadPath).catch(() => undefined);
+        if (code !== 0) {
+          console.error('[XHS publish] exited with error', { jobId, code });
+        }
+      });
+
+      child.unref();
+      return NextResponse.json({ success: true, status: 'queued', jobId }, { status: 202 });
+    }
 
     const output = await new Promise<{ code: number; stdout: string; stderr: string }>((resolve, reject) => {
       const child = spawn(python, args, {
