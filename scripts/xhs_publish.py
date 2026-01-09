@@ -2,6 +2,7 @@ import argparse
 import asyncio
 import json
 import os
+import random
 import re
 import sys
 import tempfile
@@ -13,12 +14,31 @@ from pathlib import Path
 
 from playwright.async_api import async_playwright
 
-DEFAULT_UA = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-)
+# Anti-detection: playwright-stealth integration
+try:
+    from playwright_stealth import stealth_async
+    HAS_STEALTH = True
+except ImportError:
+    HAS_STEALTH = False
+    print("PUBLISH_WARN: playwright-stealth not installed, running without stealth", file=sys.stderr)
+
+# Realistic User-Agent strings to rotate
+USER_AGENTS = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+]
+
+DEFAULT_UA = random.choice(USER_AGENTS)
 
 DEFAULT_DOWNLOAD_CONCURRENCY = 3
+
+# Anti-detection delay configuration
+MIN_DELAY_MS = int(os.environ.get("XHS_MIN_DELAY_MS", "500"))
+MAX_DELAY_MS = int(os.environ.get("XHS_MAX_DELAY_MS", "2500"))
+STEALTH_MODE = os.environ.get("XHS_STEALTH_MODE", "true").lower() in ("1", "true", "yes")
 
 
 def log_step(message):
@@ -158,6 +178,53 @@ def normalize_tags(tags):
             continue
         cleaned.append(tag.lstrip("#"))
     return cleaned
+
+
+# ============= Anti-Detection: Human Behavior Simulation =============
+
+async def human_delay(min_ms=None, max_ms=None):
+    """Add random delay to simulate human behavior."""
+    min_ms = min_ms or MIN_DELAY_MS
+    max_ms = max_ms or MAX_DELAY_MS
+    delay = random.uniform(min_ms / 1000, max_ms / 1000)
+    await asyncio.sleep(delay)
+
+
+async def human_type(page, text, min_delay_ms=50, max_delay_ms=150):
+    """Type text with human-like variable speed."""
+    for char in text:
+        await page.keyboard.type(char)
+        await asyncio.sleep(random.uniform(min_delay_ms / 1000, max_delay_ms / 1000))
+
+
+async def human_click(page, locator):
+    """Click with random delay before and after."""
+    await human_delay(300, 800)
+    await locator.click()
+    await human_delay(200, 600)
+
+
+async def human_scroll(page, direction="down", amount=None):
+    """Simulate human-like scrolling."""
+    amount = amount or random.randint(100, 300)
+    if direction == "down":
+        await page.mouse.wheel(0, amount)
+    else:
+        await page.mouse.wheel(0, -amount)
+    await human_delay(500, 1500)
+
+
+async def simulate_reading(page, seconds=None):
+    """Simulate user reading content on page."""
+    seconds = seconds or random.uniform(2, 5)
+    log_step(f"simulating reading for {seconds:.1f}s")
+    await asyncio.sleep(seconds)
+    # Random small scrolls
+    for _ in range(random.randint(1, 3)):
+        await human_scroll(page, "down", random.randint(50, 150))
+
+
+# ============= End Human Behavior Simulation =============
 
 
 async def fill_first_selector(page, selectors, value):
@@ -733,17 +800,44 @@ async def publish(payload):
 
     headless = os.environ.get("XHS_HEADLESS", "false").lower() in ("1", "true", "yes")
 
+    # Anti-detection: Browser launch arguments
+    launch_args = [
+        "--disable-blink-features=AutomationControlled",
+        "--disable-infobars",
+        "--no-first-run",
+        "--no-default-browser-check",
+        "--disable-dev-shm-usage",
+        "--disable-extensions",
+    ]
+
+    # Proxy support
+    proxy_url = os.environ.get("XHS_PROXY_URL", "").strip()
+
     async with async_playwright() as playwright:
         browser = None
         try:
-            browser = await playwright.chromium.launch(headless=headless, channel="chrome")
+            browser = await playwright.chromium.launch(
+                headless=headless,
+                channel="chrome",
+                args=launch_args
+            )
         except Exception:
-            browser = await playwright.chromium.launch(headless=headless)
+            browser = await playwright.chromium.launch(
+                headless=headless,
+                args=launch_args
+            )
 
-        context = await browser.new_context(
-            viewport={"width": 1600, "height": 900},
-            user_agent=DEFAULT_UA,
-        )
+        context_options = {
+            "viewport": {"width": 1600, "height": 900},
+            "user_agent": DEFAULT_UA,
+            "locale": "zh-CN",
+            "timezone_id": "Asia/Shanghai",
+        }
+        if proxy_url:
+            context_options["proxy"] = {"server": proxy_url}
+            log_step(f"using proxy: {proxy_url}")
+
+        context = await browser.new_context(**context_options)
         await context.add_cookies(parse_cookie(cookie))
 
         log_step(f"download media count={len(media_requests)}")
@@ -752,6 +846,12 @@ async def publish(payload):
         log_step(f"download complete in {time.perf_counter() - download_start:.1f}s")
 
         page = await context.new_page()
+
+        # Anti-detection: Apply playwright-stealth
+        if STEALTH_MODE and HAS_STEALTH:
+            log_step("applying stealth mode")
+            await stealth_async(page)
+
         target = "video" if note_type == "video" else "note"
         publish_url = f"https://creator.xiaohongshu.com/publish/publish?from=homepage&target={target}"
         log_step(f"open publish page target={target}")
@@ -761,7 +861,9 @@ async def publish(payload):
             await page.wait_for_load_state("networkidle", timeout=10000)
         except Exception:
             pass
-        await page.wait_for_timeout(2000)
+
+        # Anti-detection: Simulate human reading behavior
+        await human_delay(1500, 3000)
         log_step(f"publish page loaded in {time.perf_counter() - page_start:.1f}s")
         if "login" in page.url or await page.locator("text=手机号登录").count():
             raise RuntimeError("cookie invalid or expired for creator platform")
@@ -845,6 +947,9 @@ async def publish(payload):
         else:
             await page.wait_for_timeout(5000)
 
+        # Anti-detection: Add delay before filling content
+        await human_delay(1000, 2500)
+
         # Fill title and content
         log_step("fill title and content")
         await fill_first_selector(
@@ -858,12 +963,18 @@ async def publish(payload):
             title[:20]
         )
 
+        # Anti-detection: Add delay between title and content
+        await human_delay(800, 1800)
+
         await type_in_editor(
             page,
             [".ql-editor", "[contenteditable=\"true\"]"],
             content,
             tags
         )
+
+        # Anti-detection: Add delay before clicking publish
+        await human_delay(1500, 3500)
 
         log_step("click publish")
         publish_button = page.locator("button:has-text(\"发布\")")
