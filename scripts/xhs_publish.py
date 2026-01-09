@@ -283,6 +283,81 @@ async def try_click_publish_tab(page, note_type):
     return False
 
 
+async def log_upload_dom_state(page, label):
+    try:
+        info = await page.evaluate(
+            """
+            () => {
+              const input = document.querySelector('input.upload-input');
+              const fileInputs = Array.from(document.querySelectorAll('input[type="file"]'));
+              const uploadButton = document.querySelector('button.upload-button')
+                || Array.from(document.querySelectorAll('button')).find(btn => (btn.textContent || '').includes('上传视频'));
+              return {
+                readyState: document.readyState,
+                url: window.location.href,
+                uploadInput: input ? input.outerHTML : null,
+                uploadInputDisabled: input ? input.disabled : null,
+                fileInputCount: fileInputs.length,
+                hasUploadButton: !!uploadButton
+              };
+            }
+            """
+        )
+        print(f"PUBLISH_DEBUG: dom_state {label} {info}", file=sys.stderr)
+    except Exception as exc:
+        print(f"PUBLISH_WARN: dom_state failed {label}: {exc}", file=sys.stderr)
+
+
+async def log_file_inputs(container, label):
+    try:
+        info = await container.evaluate(
+            """
+            () => {
+              const inputs = Array.from(document.querySelectorAll('input[type="file"]'));
+              const summary = (el) => ({
+                id: el.id || null,
+                name: el.name || null,
+                className: el.className || '',
+                accept: el.getAttribute('accept') || '',
+                multiple: !!el.multiple,
+                disabled: !!el.disabled,
+                display: getComputedStyle(el).display,
+                visibility: getComputedStyle(el).visibility,
+                opacity: getComputedStyle(el).opacity,
+                outerHTML: (el.outerHTML || '').slice(0, 300)
+              });
+              return {
+                count: inputs.length,
+                items: inputs.slice(0, 5).map(summary)
+              };
+            }
+            """
+        )
+        print(f"PUBLISH_DEBUG: file_inputs {label} {info}", file=sys.stderr)
+    except Exception as exc:
+        print(f"PUBLISH_WARN: file_inputs failed {label}: {exc}", file=sys.stderr)
+
+
+async def log_file_inputs_for_frames(page, label):
+    await log_file_inputs(page, label)
+    for frame in page.frames:
+        if not frame.url or frame.url == page.url:
+            continue
+        await log_file_inputs(frame, f"{label} frame={frame.url}")
+
+
+async def wait_for_input_enabled(container, selector, timeout_ms):
+    try:
+        await container.wait_for_function(
+            "(sel) => { const el = document.querySelector(sel); return !!el && !el.disabled; }",
+            selector,
+            timeout=timeout_ms
+        )
+        return True
+    except Exception:
+        return False
+
+
 async def try_open_publish_from_home(page, note_type):
     if note_type == "video":
         selectors = [
@@ -344,6 +419,8 @@ async def try_file_chooser_upload(page, selectors, media_files):
 async def perform_upload(page, media_files, note_type):
     timeout_seconds = 60 if note_type == "video" else 20
     if note_type == "video":
+        await log_upload_dom_state(page, "before_video_upload")
+        await log_file_inputs_for_frames(page, "before_video_upload")
         selectors = [
             "#creator-publish-dom input.upload-input",
             "input.upload-input"
@@ -353,6 +430,7 @@ async def perform_upload(page, media_files, note_type):
             try:
                 handle = await page.wait_for_selector(selector, state="attached", timeout=timeout_seconds * 1000)
                 if handle:
+                    await wait_for_input_enabled(page, selector, timeout_ms=5000)
                     await handle.set_input_files(media_files[0])
                     return True
             except Exception as exc:
@@ -363,16 +441,32 @@ async def perform_upload(page, media_files, note_type):
                 try:
                     handle = await frame.wait_for_selector(selector, state="attached", timeout=timeout_seconds * 1000)
                     if handle:
+                        await wait_for_input_enabled(frame, selector, timeout_ms=5000)
                         await handle.set_input_files(media_files[0])
                         return True
                 except Exception as exc:
                     last_exc = exc
                     continue
-        try:
-            count = await page.evaluate("document.querySelectorAll('input[type=file]').length")
-            print(f"PUBLISH_DEBUG: file input count in DOM={count}", file=sys.stderr)
-        except Exception:
-            pass
+        upload_button_selectors = [
+            "button.upload-button",
+            "button:has-text(\"上传视频\")",
+            "text=上传视频"
+        ]
+        for selector in upload_button_selectors:
+            try:
+                button = await page.wait_for_selector(selector, state="attached", timeout=timeout_seconds * 1000)
+                if not button:
+                    continue
+                async with page.expect_file_chooser(timeout=5000) as fc_info:
+                    await button.click()
+                chooser = await fc_info.value
+                await chooser.set_files(media_files[0])
+                return True
+            except Exception as exc:
+                last_exc = exc
+                continue
+        await log_upload_dom_state(page, "after_video_upload")
+        await log_file_inputs_for_frames(page, "after_video_upload")
         if last_exc:
             print(f"PUBLISH_WARN: direct upload-input failed: {last_exc}", file=sys.stderr)
     file_input_info = await wait_for_file_input(page, note_type, timeout_seconds=timeout_seconds)
@@ -416,6 +510,14 @@ async def perform_upload(page, media_files, note_type):
     ]
     if await try_file_chooser_upload(page, upload_selectors, media_files):
         return True
+    if note_type == "video":
+        fallback_input = page.locator("input[type=\"file\"]")
+        if await fallback_input.count():
+            try:
+                await fallback_input.first.set_input_files([media_files[0]])
+                return True
+            except Exception as exc:
+                print(f"PUBLISH_WARN: fallback file input failed: {exc}", file=sys.stderr)
     return False
 
 
