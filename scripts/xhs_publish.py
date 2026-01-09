@@ -473,6 +473,9 @@ async def perform_upload(page, media_files, note_type):
         await log_file_inputs_for_frames(page, "after_video_upload")
         if last_exc:
             print(f"PUBLISH_WARN: direct upload-input failed: {last_exc}", file=sys.stderr)
+    else:
+        await log_upload_dom_state(page, "before_note_upload")
+        await log_file_inputs_for_frames(page, "before_note_upload")
     file_input_info = await wait_for_file_input(page, note_type, timeout_seconds=timeout_seconds)
     if file_input_info:
         file_input, accept_value, is_multiple = file_input_info
@@ -522,6 +525,9 @@ async def perform_upload(page, media_files, note_type):
                 return True
             except Exception as exc:
                 print(f"PUBLISH_WARN: fallback file input failed: {exc}", file=sys.stderr)
+    else:
+        await log_upload_dom_state(page, "after_note_upload")
+        await log_file_inputs_for_frames(page, "after_note_upload")
     return False
 
 
@@ -629,7 +635,7 @@ async def publish(payload):
         log_step("uploading media")
         uploaded = await perform_upload(page, media_files, note_type)
         if not uploaded:
-            fallback_url = "https://creator.xiaohongshu.com/publish/publish"
+            fallback_url = f"https://creator.xiaohongshu.com/publish/publish?from=menu&target={target}"
             if page.url != fallback_url:
                 log_step("upload retry on fallback publish page")
                 await page.goto(fallback_url, wait_until="domcontentloaded")
