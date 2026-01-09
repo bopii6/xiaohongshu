@@ -24,10 +24,10 @@ interface RewriteResult {
 }
 
 const styleOptions = [
-  { value: 'similar', label: '鐩镐技椋庢牸', emoji: '馃攧' },
-  { value: 'creative', label: '鍒涙剰鏀瑰啓', emoji: '鉁? },
-  { value: 'professional', label: '涓撲笟鐗?, emoji: '馃搳' },
-  { value: 'casual', label: '鍙ｈ鍖?, emoji: '馃挰' }
+  { value: 'similar', label: '相似风格', emoji: '🔁' },
+  { value: 'creative', label: '创意改写', emoji: '✨' },
+  { value: 'professional', label: '专业版', emoji: '📊' },
+  { value: 'casual', label: '口语化', emoji: '💬' }
 ];
 
 export default function RewritePage() {
@@ -503,5 +503,6 @@ export default function RewritePage() {
     </div>
   );
 }
+
 
 
