@@ -18,6 +18,10 @@ DEFAULT_UA = (
 )
 
 
+def log_step(message):
+    print(f"PUBLISH_STEP: {message}", file=sys.stderr)
+
+
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--payload", required=True, help="Path to publish payload json")
@@ -547,6 +551,8 @@ async def publish(payload):
     note_type = payload.get("noteType") or ("video" if payload.get("videoUrl") else "note")
     source_url = payload.get("sourceUrl") or "https://www.xiaohongshu.com/"
 
+    log_step(f"start note_type={note_type}")
+
     base_dir = Path(payload.get("workDir") or Path(__file__).resolve().parent.parent / "data" / "publish")
     base_dir.mkdir(parents=True, exist_ok=True)
     download_dir = Path(tempfile.mkdtemp(prefix="xhs_publish_", dir=base_dir))
@@ -581,6 +587,7 @@ async def publish(payload):
         )
         await context.add_cookies(parse_cookie(cookie))
 
+        log_step(f"download media count={len(media_requests)}")
         media_files = []
         for kind, url, filename in media_requests:
             dest_path = download_dir / filename
@@ -593,16 +600,19 @@ async def publish(payload):
                     print(f"PUBLISH_WARN: context download failed for {url} ({exc}), fallback to urllib", file=sys.stderr)
                     download_file(url, dest_path, referer=source_url, cookie=cookie)
             media_files.append(str(dest_path))
+        log_step("download complete")
 
         page = await context.new_page()
         target = "video" if note_type == "video" else "note"
         publish_url = f"https://creator.xiaohongshu.com/publish/publish?from=homepage&target={target}"
+        log_step(f"open publish page target={target}")
         await page.goto(publish_url, wait_until="domcontentloaded")
         try:
             await page.wait_for_load_state("networkidle", timeout=10000)
         except Exception:
             pass
         await page.wait_for_timeout(2000)
+        log_step("publish page loaded")
         if "login" in page.url or await page.locator("text=手机号登录").count():
             raise RuntimeError("cookie invalid or expired for creator platform")
         if "/new/home" in page.url or "/home" in page.url:
@@ -616,10 +626,12 @@ async def publish(payload):
                 await wait_for_publish_page(page)
 
         # Upload media
+        log_step("uploading media")
         uploaded = await perform_upload(page, media_files, note_type)
         if not uploaded:
             fallback_url = "https://creator.xiaohongshu.com/publish/publish"
             if page.url != fallback_url:
+                log_step("upload retry on fallback publish page")
                 await page.goto(fallback_url, wait_until="domcontentloaded")
                 try:
                     await page.wait_for_load_state("networkidle", timeout=10000)
@@ -645,12 +657,14 @@ async def publish(payload):
             )
             raise RuntimeError("file input not found on publish page")
 
+        log_step("upload done")
         if note_type == "video":
             await wait_video_upload(page)
         else:
             await page.wait_for_timeout(5000)
 
         # Fill title and content
+        log_step("fill title and content")
         await fill_first_selector(
             page,
             [
@@ -669,6 +683,7 @@ async def publish(payload):
             tags
         )
 
+        log_step("click publish")
         publish_button = page.locator("button:has-text(\"发布\")")
         if await publish_button.count():
             await publish_button.first.click()
@@ -676,6 +691,7 @@ async def publish(payload):
             raise RuntimeError("publish button not found")
 
         await page.wait_for_url(re.compile(r"/publish/success"), timeout=60000)
+        log_step("publish success")
 
         await context.close()
         await browser.close()
