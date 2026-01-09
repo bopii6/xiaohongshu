@@ -268,10 +268,14 @@ async def try_click_publish_tab(page, note_type):
         ]
     else:
         selectors = [
+            ".creator-tab:has-text(\"上传图文\")",
+            ".creator-tab:has-text(\"图文\")",
             "button:has-text(\"图文\")",
             "[role=\"tab\"]:has-text(\"图文\")",
             "[role=\"button\"]:has-text(\"图文\")",
+            "text=上传图文",
             "text=图文笔记",
+            "text=发布笔记",
             "text=笔记",
             "text=图文"
         ]
@@ -284,6 +288,42 @@ async def try_click_publish_tab(page, note_type):
                 return True
             except Exception:
                 continue
+    return False
+
+
+async def click_first_visible(page, selectors):
+    for selector in selectors:
+        locator = page.locator(selector)
+        count = await locator.count()
+        for idx in range(min(count, 5)):
+            item = locator.nth(idx)
+            try:
+                if await item.is_visible():
+                    await item.click()
+                    await page.wait_for_timeout(800)
+                    return True
+            except Exception:
+                continue
+    return False
+
+
+async def ensure_note_tab(page):
+    selectors = [
+        ".creator-tab:has-text(\"上传图文\")",
+        ".creator-tab:has-text(\"图文\")",
+        "[role=\"tab\"]:has-text(\"上传图文\")",
+        "[role=\"tab\"]:has-text(\"图文\")",
+        "button:has-text(\"上传图文\")",
+        "button:has-text(\"图文\")",
+        "text=上传图文",
+        "text=发布笔记",
+        "text=图文"
+    ]
+    clicked = await click_first_visible(page, selectors)
+    if clicked:
+        file_input = await wait_for_file_input(page, "note", timeout_seconds=8)
+        if file_input:
+            return True
     return False
 
 
@@ -630,6 +670,20 @@ async def publish(payload):
             opened = await try_open_publish_from_home(page, note_type)
             if opened:
                 await wait_for_publish_page(page)
+        if note_type == "note":
+            if "target=video" in page.url:
+                log_step("force note publish url")
+                await page.goto(
+                    "https://creator.xiaohongshu.com/publish/publish?from=menu&target=note",
+                    wait_until="domcontentloaded"
+                )
+                try:
+                    await page.wait_for_load_state("networkidle", timeout=10000)
+                except Exception:
+                    pass
+                await page.wait_for_timeout(1500)
+            log_step("ensure note tab")
+            await ensure_note_tab(page)
 
         # Upload media
         log_step("uploading media")
@@ -651,6 +705,20 @@ async def publish(payload):
                     opened = await try_open_publish_from_home(page, note_type)
                     if opened:
                         await wait_for_publish_page(page)
+                if note_type == "note":
+                    if "target=video" in page.url:
+                        log_step("force note publish url (retry)")
+                        await page.goto(
+                            "https://creator.xiaohongshu.com/publish/publish?from=menu&target=note",
+                            wait_until="domcontentloaded"
+                        )
+                        try:
+                            await page.wait_for_load_state("networkidle", timeout=10000)
+                        except Exception:
+                            pass
+                        await page.wait_for_timeout(1500)
+                    log_step("ensure note tab (retry)")
+                    await ensure_note_tab(page)
                 uploaded = await perform_upload(page, media_files, note_type)
 
         if not uploaded:
