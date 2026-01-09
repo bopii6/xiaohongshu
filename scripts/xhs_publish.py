@@ -345,10 +345,21 @@ async def perform_upload(page, media_files, note_type):
     timeout_seconds = 25 if note_type == "video" else 15
     if note_type == "video":
         try:
-            await page.wait_for_selector("input.upload-input", timeout=timeout_seconds * 1000)
-            await page.set_input_files("input.upload-input", media_files[0])
-            return True
-        except Exception:
+            await page.wait_for_function(
+                "() => !!document.querySelector('input.upload-input')",
+                timeout=timeout_seconds * 1000
+            )
+            handle = await page.query_selector("input.upload-input")
+            if handle:
+                await handle.set_input_files(media_files[0])
+                return True
+        except Exception as exc:
+            try:
+                count = await page.evaluate("document.querySelectorAll('input[type=file]').length")
+                print(f"PUBLISH_DEBUG: file input count in DOM={count}", file=sys.stderr)
+            except Exception:
+                pass
+            print(f"PUBLISH_WARN: direct upload-input failed: {exc}", file=sys.stderr)
             pass
     file_input_info = await wait_for_file_input(page, note_type, timeout_seconds=timeout_seconds)
     if file_input_info:
