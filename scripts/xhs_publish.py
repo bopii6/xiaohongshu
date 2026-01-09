@@ -207,9 +207,45 @@ async def find_file_input(page, note_type):
     return best[1], best[2], best[3]
 
 
+async def get_input_info(handle, note_type):
+    try:
+        accept_value = await handle.evaluate("el => el.getAttribute('accept') || ''")
+        is_multiple = await handle.evaluate("el => !!el.multiple")
+    except Exception:
+        return None
+    score = score_file_input(accept_value, is_multiple, note_type)
+    if score < 0:
+        return None
+    return handle, accept_value, is_multiple
+
+
+async def find_file_input_by_selectors(container, selectors, note_type):
+    for selector in selectors:
+        locator = container.locator(selector)
+        if await locator.count():
+            info = await get_input_info(locator.first, note_type)
+            if info:
+                return info
+    return None
+
+
 async def wait_for_file_input(page, note_type, timeout_seconds=20):
+    selectors = [
+        "input.upload-input",
+        "input[type=\"file\"][accept*=\".mp4\"]",
+        "input[type=\"file\"][accept*=\"video\"]",
+        "input[type=\"file\"][accept*=\"image\"]",
+        "input[type=\"file\"]"
+    ]
     start = time.time()
     while time.time() - start < timeout_seconds:
+        file_input = await find_file_input_by_selectors(page, selectors, note_type)
+        if file_input:
+            return file_input
+        for frame in page.frames:
+            file_input = await find_file_input_by_selectors(frame, selectors, note_type)
+            if file_input:
+                return file_input
         file_input = await find_file_input(page, note_type)
         if file_input:
             return file_input
@@ -306,7 +342,8 @@ async def try_file_chooser_upload(page, selectors, media_files):
 
 
 async def perform_upload(page, media_files, note_type):
-    file_input_info = await wait_for_file_input(page, note_type, timeout_seconds=8)
+    timeout_seconds = 25 if note_type == "video" else 15
+    file_input_info = await wait_for_file_input(page, note_type, timeout_seconds=timeout_seconds)
     if file_input_info:
         file_input, accept_value, is_multiple = file_input_info
         if note_type == "video":
