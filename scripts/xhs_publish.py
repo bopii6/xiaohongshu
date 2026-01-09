@@ -166,6 +166,82 @@ async def wait_video_upload(page, timeout_seconds=180):
     return False
 
 
+async def collect_page_messages(page):
+    try:
+        messages = await page.evaluate(
+            """
+            () => {
+              const selectors = [
+                '.el-message', '.el-notification', '.ant-message', '.ant-notification',
+                '.toast', '.toast-message', '[role=\"alert\"]', '.el-dialog__body',
+                '.dialog', '.modal', '.ant-modal-body'
+              ];
+              const texts = [];
+              selectors.forEach((selector) => {
+                document.querySelectorAll(selector).forEach((el) => {
+                  const text = (el.textContent || '').trim();
+                  if (text && text.length < 200) texts.push(text);
+                });
+              });
+              return Array.from(new Set(texts)).slice(0, 5);
+            }
+            """
+        )
+        return messages or []
+    except Exception:
+        return []
+
+
+async def try_confirm_publish(page):
+    selectors = [
+        "button:has-text(\"确认发布\")",
+        "button:has-text(\"确认\")",
+        "button:has-text(\"继续\")",
+        "button:has-text(\"知道了\")",
+        "button:has-text(\"我知道了\")"
+    ]
+    for selector in selectors:
+        locator = page.locator(selector)
+        if await locator.count():
+            try:
+                if await locator.first.is_visible():
+                    await locator.first.click()
+                    await page.wait_for_timeout(800)
+                    return True
+            except Exception:
+                continue
+    return False
+
+
+async def wait_for_publish_result(page, timeout_seconds=90):
+    end_time = time.time() + timeout_seconds
+    success_selectors = [
+        "text=发布成功",
+        "text=审核中",
+        "text=发布完成",
+        "text=发布成功，请稍后查看",
+    ]
+    error_keywords = [
+        "发布失败", "失败", "错误", "验证码", "登录", "实名", "绑定",
+        "超限", "限制", "标题最多", "内容不符合", "敏感", "违规"
+    ]
+    while time.time() < end_time:
+        if re.search(r"/publish/success", page.url):
+            return True
+        for selector in success_selectors:
+            if await page.locator(selector).count():
+                return True
+        messages = await collect_page_messages(page)
+        if messages:
+            print(f"PUBLISH_DEBUG: messages {messages}", file=sys.stderr)
+            for msg in messages:
+                if any(keyword in msg for keyword in error_keywords):
+                    raise RuntimeError(f"publish failed: {msg}")
+        await try_confirm_publish(page)
+        await page.wait_for_timeout(1000)
+    return False
+
+
 def score_file_input(accept_value, is_multiple, note_type):
     accept_value = (accept_value or "").lower()
     has_video = "video" in accept_value or any(ext in accept_value for ext in ("mp4", "mov", "flv", "mkv", "rmvb", "m4v", "mpeg", "mpg", "ts"))
@@ -764,7 +840,11 @@ async def publish(payload):
         else:
             raise RuntimeError("publish button not found")
 
-        await page.wait_for_url(re.compile(r"/publish/success"), timeout=60000)
+        log_step("wait for publish result")
+        published = await wait_for_publish_result(page, timeout_seconds=90)
+        if not published:
+            html_path, png_path = await dump_publish_debug(page, base_dir)
+            raise RuntimeError(f"publish result timeout; html={html_path}; screenshot={png_path}")
         log_step("publish success")
 
         await context.close()
