@@ -2,122 +2,139 @@
 
 import Link from 'next/link';
 
+interface FeatureCard {
+  href: string;
+  icon: string;
+  title: string;
+  description: string;
+  color: string;
+  bgColor: string;
+}
+
+const features: FeatureCard[] = [
+  {
+    href: '/rewrite',
+    icon: '🔗',
+    title: '对标图文',
+    description: '一键生成全新标题文案',
+    color: 'green',
+    bgColor: 'bg-green-50'
+  },
+  {
+    href: '/product-create',
+    icon: '📦',
+    title: '我有产品',
+    description: '一张图生成爆款文案',
+    color: 'blue',
+    bgColor: 'bg-blue-50'
+  },
+  {
+    href: '/trending-create',
+    icon: '🔥',
+    title: '爆款创作',
+    description: '搜热门一键生成爆文',
+    color: 'orange',
+    bgColor: 'bg-orange-50'
+  },
+  {
+    href: '/title-lab',
+    icon: '🧪',
+    title: '爆款标题',
+    description: '5秒生成19个标题',
+    color: 'yellow',
+    bgColor: 'bg-yellow-50'
+  },
+  {
+    href: '/content-lab',
+    icon: '✍️',
+    title: '爆款文案',
+    description: '10秒生成500字文案',
+    color: 'pink',
+    bgColor: 'bg-pink-50'
+  },
+  {
+    href: '/note-diagnosis',
+    icon: '🩺',
+    title: '笔记诊断',
+    description: '对比同行给出优化方案',
+    color: 'purple',
+    bgColor: 'bg-purple-50'
+  },
+  {
+    href: '/video-extract',
+    icon: '🎬',
+    title: '视频提取',
+    description: '秒提视频字幕文案',
+    color: 'indigo',
+    bgColor: 'bg-indigo-50'
+  },
+  {
+    href: '/sensitive-check',
+    icon: '🛡️',
+    title: '敏感词检测',
+    description: '发布前检测违规词',
+    color: 'red',
+    bgColor: 'bg-red-50'
+  },
+  {
+    href: '/competitor-analysis',
+    icon: '📊',
+    title: '分析同行',
+    description: '深度分析同行策略',
+    color: 'teal',
+    bgColor: 'bg-teal-50'
+  }
+];
+
 export default function Home() {
   return (
-    <div className="min-h-screen bg-[#F8F8F8] pb-24 font-sans text-[#333]">
+    <div className="min-h-screen bg-gradient-to-br from-[#FFF5F5] via-white to-[#FFF0F5] font-sans">
       {/* Header */}
-      <header className="fixed top-0 left-0 right-0 bg-white z-50 px-6 py-4 shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
-        <h1 className="text-xl font-bold tracking-tight text-[#FF2442]">RedNote</h1>
+      <header className="px-5 pt-[env(safe-area-inset-top)] pb-2">
+        <div className="pt-4 flex items-center justify-between">
+          <h1 className="text-xl font-bold tracking-tight text-[#FF2442]">RedNote AI</h1>
+          <span className="text-xs text-white bg-gradient-to-r from-pink-500 to-red-500 px-3 py-1 rounded-full font-medium">创作助手</span>
+        </div>
       </header>
 
-      <main className="pt-24 px-6 max-w-md mx-auto">
-        {/* Hero */}
-        <div className="mb-10 animate-slide-up">
-          <h2 className="text-2xl font-bold mb-2 text-[#333]">👋 欢迎回来</h2>
-          <p className="text-[#999] text-sm">今天想创作什么内容？</p>
+      <main className="px-4 pb-6">
+        {/* Hero - Compact */}
+        <div className="text-center py-4">
+          <h2 className="text-lg font-bold text-[#333]">今天想创作什么？</h2>
+          <p className="text-[#999] text-xs mt-1">9大功能助你打造爆款内容</p>
         </div>
 
-        {/* Entry Cards */}
-        <div className="space-y-6 animate-slide-up" style={{ animationDelay: '0.1s' }}>
-          {/* Business Card */}
-          <Link href="/create?type=business" className="block group">
-            <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 transition-all active:scale-95 active:bg-gray-50 relative overflow-hidden">
-              <div className="absolute right-0 top-0 w-32 h-32 bg-red-50 rounded-full translate-x-10 -translate-y-10 opacity-50" />
-
-              <div className="relative z-10 flex items-start justify-between mb-4">
-                <div className="w-14 h-14 rounded-2xl bg-red-50 flex items-center justify-center text-3xl shadow-sm">
-                  🛍️
+        {/* 3x3 Grid */}
+        <div className="grid grid-cols-3 gap-3">
+          {features.map((card) => (
+            <Link key={card.href} href={card.href} className="block group">
+              <div className="bg-white rounded-2xl p-3 shadow-sm border border-gray-100/50 transition-all active:scale-95 active:bg-gray-50 h-full flex flex-col items-center text-center">
+                {/* Icon */}
+                <div className={`w-12 h-12 rounded-xl ${card.bgColor} flex items-center justify-center text-2xl mb-2 shadow-sm`}>
+                  {card.icon}
                 </div>
-                <div className="w-8 h-8 rounded-full bg-gray-50 flex items-center justify-center text-gray-300 group-hover:bg-red-50 group-hover:text-red-500 transition-colors">
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7" /></svg>
-                </div>
+                {/* Title */}
+                <h3 className="text-sm font-bold text-[#333] mb-1">{card.title}</h3>
+                {/* Description */}
+                <p className="text-[10px] text-[#999] leading-tight line-clamp-2">
+                  {card.description}
+                </p>
               </div>
-              <h3 className="relative z-10 text-xl font-bold mb-2 text-[#333]">商家推广</h3>
-              <p className="relative z-10 text-[#666] text-sm leading-relaxed">
-                专为电商/实体店设计。一键生成种草文案、探店笔记，提升转化率。
-              </p>
+            </Link>
+          ))}
+        </div>
+
+        {/* Quick Tips */}
+        <div className="mt-4 bg-gradient-to-r from-pink-50 to-orange-50 rounded-2xl p-4 border border-pink-100/50">
+          <div className="flex items-center gap-3">
+            <span className="text-2xl">💡</span>
+            <div>
+              <p className="text-sm font-medium text-gray-800">新手推荐</p>
+              <p className="text-xs text-gray-500">试试「爆款文案」或「敏感词检测」开始创作</p>
             </div>
-          </Link>
-
-          {/* IP Card */}
-          <Link href="/create?type=ip" className="block group">
-            <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 transition-all active:scale-95 active:bg-gray-50 relative overflow-hidden">
-              <div className="absolute right-0 top-0 w-32 h-32 bg-purple-50 rounded-full translate-x-10 -translate-y-10 opacity-50" />
-
-              <div className="relative z-10 flex items-start justify-between mb-4">
-                <div className="w-14 h-14 rounded-2xl bg-purple-50 flex items-center justify-center text-3xl shadow-sm">
-                  ✨
-                </div>
-                <div className="w-8 h-8 rounded-full bg-gray-50 flex items-center justify-center text-gray-300 group-hover:bg-purple-50 group-hover:text-purple-500 transition-colors">
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7" /></svg>
-                </div>
-              </div>
-              <h3 className="relative z-10 text-xl font-bold mb-2 text-[#333]">个人 IP</h3>
-              <p className="relative z-10 text-[#666] text-sm leading-relaxed">
-                打造个人品牌。辅助选题、润色文案，保持高质量持续输出。
-              </p>
-            </div>
-          </Link>
-
-          {/* Title Lab Card */}
-          <Link href="/title-lab" className="block group">
-            <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 transition-all active:scale-95 active:bg-gray-50 relative overflow-hidden">
-              <div className="absolute right-0 top-0 w-32 h-32 bg-orange-50 rounded-full translate-x-10 -translate-y-10 opacity-50" />
-
-              <div className="relative z-10 flex items-start justify-between mb-4">
-                <div className="w-14 h-14 rounded-2xl bg-orange-50 flex items-center justify-center text-3xl shadow-sm">
-                  🧪
-                </div>
-                <div className="w-8 h-8 rounded-full bg-gray-50 flex items-center justify-center text-gray-300 group-hover:bg-orange-50 group-hover:text-orange-500 transition-colors">
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7" /></svg>
-                </div>
-              </div>
-              <h3 className="relative z-10 text-xl font-bold mb-2 text-[#333]">爆款标题</h3>
-              <p className="relative z-10 text-[#666] text-sm leading-relaxed">
-                起标题太难？输入话题，一键生成悬念、干货、情绪等 4 类爆款标题。
-              </p>
-            </div>
-          </Link>
-
-          {/* Rewrite Card */}
-          <Link href="/rewrite" className="block group">
-            <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 transition-all active:scale-95 active:bg-gray-50 relative overflow-hidden">
-              <div className="absolute right-0 top-0 w-32 h-32 bg-green-50 rounded-full translate-x-10 -translate-y-10 opacity-50" />
-
-              <div className="relative z-10 flex items-start justify-between mb-4">
-                <div className="w-14 h-14 rounded-2xl bg-green-50 flex items-center justify-center text-3xl shadow-sm">
-                  🔄
-                </div>
-                <div className="w-8 h-8 rounded-full bg-gray-50 flex items-center justify-center text-gray-300 group-hover:bg-green-50 group-hover:text-green-500 transition-colors">
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7" /></svg>
-                </div>
-              </div>
-              <h3 className="relative z-10 text-xl font-bold mb-2 text-[#333]">爆款&quot;洗稿&quot;/仿写</h3>
-              <p className="relative z-10 text-[#666] text-sm leading-relaxed">
-                跟着爆款发，流量差不了
-              </p>
-            </div>
-          </Link>
+          </div>
         </div>
       </main>
-
-      {/* Bottom Nav */}
-      <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-100 pb-[env(safe-area-inset-bottom)] z-50">
-        <div className="flex justify-around items-center h-16">
-          <Link href="/" className="flex flex-col items-center space-y-1 text-[#333]">
-            <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2L2 12h3v8h6v-6h2v6h6v-8h3L12 2z" /></svg>
-            <span className="text-[10px] font-medium">首页</span>
-          </Link>
-          <Link href="/templates" className="flex flex-col items-center space-y-1 text-[#999]">
-            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" /></svg>
-            <span className="text-[10px] font-medium">模板</span>
-          </Link>
-          <Link href="/history" className="flex flex-col items-center space-y-1 text-[#999]">
-            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
-            <span className="text-[10px] font-medium">我的</span>
-          </Link>
-        </div>
-      </div>
     </div>
   );
 }

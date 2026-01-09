@@ -23,6 +23,7 @@
 # misc
 .DS_Store
 *.pem
+/data/publish/
 
 # debug
 npm-debug.log*

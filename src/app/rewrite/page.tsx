@@ -1,191 +1,168 @@
 'use client';
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
+import PublishButton from '@/components/PublishButton';
 
 type RewriteStyle = 'similar' | 'creative' | 'professional' | 'casual';
 
+interface ParsedNote {
+  title: string;
+  content: string;
+  author: string;
+  images: string[];
+  videoUrl?: string;
+  noteType?: string;
+  sourceUrl?: string;
+}
+
 interface RewriteResult {
-  originalTitle: string;
   newTitles: string[];
-  originalContent: string;
   newContent: string;
   keyPoints: string[];
-  model: string;
 }
 
-type RewriteStreamPayload =
-  | { type: 'content'; data: string }
-  | { type: 'result'; data: RewriteResult }
-  | { type: 'error'; data: string };
-
-function getErrorMessage(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message;
-  }
-  if (typeof error === 'string') {
-    return error;
-  }
-  return '未知错误';
-}
+const styleOptions = [
+  { value: 'similar', label: '相似风格', emoji: '🔄' },
+  { value: 'creative', label: '创意改写', emoji: '✨' },
+  { value: 'professional', label: '专业版', emoji: '📊' },
+  { value: 'casual', label: '口语化', emoji: '💬' }
+];
 
 export default function RewritePage() {
-  const [originalTitle, setOriginalTitle] = useState('');
-  const [originalContent, setOriginalContent] = useState('');
+  const [linkInput, setLinkInput] = useState('');
   const [rewriteStyle, setRewriteStyle] = useState<RewriteStyle>('similar');
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [isOcrProcessing, setIsOcrProcessing] = useState(false);
+  const [isParsing, setIsParsing] = useState(false);
+  const [isRewriting, setIsRewriting] = useState(false);
+  const [parsedNote, setParsedNote] = useState<ParsedNote | null>(null);
   const [result, setResult] = useState<RewriteResult | null>(null);
   const [selectedTitle, setSelectedTitle] = useState('');
-  const [isContentParsed, setIsContentParsed] = useState(false);
-  const [, setUploadedImage] = useState<File | null>(null);
-  const [imagePreview, setImagePreview] = useState<string>('');
-  const [selectedModel, setSelectedModel] = useState('glm-4.5-flash');
-  const [streamingContent, setStreamingContent] = useState('');
+  const [error, setError] = useState('');
+  const rewriteInFlightRef = useRef(false);
+  const rewriteAbortRef = useRef<AbortController | null>(null);
 
-  const livePreview = !result ? streamingContent : '';
-  const displayContent = result?.newContent || '';
-  const displayTitles = result?.newTitles || [];
-  const showResultPanel = Boolean(result);
-
-  const styleOptions = [
-    { value: 'similar', label: '相似风格', description: '保持原文风格，优化表达' },
-    { value: 'creative', label: '创意改写', description: '增加创意元素，提升吸引力' },
-    { value: 'professional', label: '专业版', description: '突出专业性和权威性' },
-    { value: 'casual', label: '口语化', description: '更加亲切自然，接地气' }
-  ];
-
-  const modelOptions = [
-    {
-      value: 'glm-4-flash',
-      label: '清华智谱 GLM-4 Flash',
-      description: '免费极速版，适合快写'
-    },
-    {
-      value: 'glm-4.5-flash',
-      label: '清华智谱 GLM-4.5 Flash',
-      description: '免费稳定版，结构更好'
+  // 从分享文本中智能提取信息
+  const extractFromShareText = (text: string) => {
+    // 提取【】中的标题
+    const bracketMatch = text.match(/【([^】]+)】/);
+    let title = '';
+    if (bracketMatch) {
+      // 格式通常是: 标题 - 作者 | 小红书
+      const parts = bracketMatch[1].split(/\s*[-|]\s*/);
+      title = parts[0]?.trim() || '';
     }
-  ];
 
-  const handleImageUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
+    // 提取作者（在 - 和 | 之间）
+    const authorMatch = text.match(/【[^】]*\s*-\s*([^|]+)\s*\|/);
+    const author = authorMatch?.[1]?.trim() || '';
 
-    // 验证文件类型
-    const allowedTypes = ['image/jpeg', 'image/png', 'image/jpg', 'image/webp'];
-    if (!allowedTypes.includes(file.type)) {
-      alert('请上传 JPEG、PNG 或 WebP 格式的图片');
+    return { title, author };
+  };
+
+  // 解析链接
+  const parseLink = async () => {
+    if (!linkInput.trim()) {
+      setError('请粘贴小红书笔记链接');
       return;
     }
 
-    // 验证文件大小 (10MB限制)
-    const maxSize = 10 * 1024 * 1024;
-    if (file.size > maxSize) {
-      alert('图片文件过大，请上传小于10MB的图片');
+    // 验证是否包含小红书链接
+    if (!linkInput.includes('xiaohongshu.com') && !linkInput.includes('xhslink.com')) {
+      setError('请粘贴有效的小红书链接');
       return;
     }
 
-    setUploadedImage(file);
-    setIsOcrProcessing(true);
-    setIsContentParsed(false);
-
-    // 创建图片预览
-    const reader = new FileReader();
-    reader.onload = (event: ProgressEvent<FileReader>) => {
-      const preview = event.target?.result;
-      if (typeof preview === 'string') {
-        setImagePreview(preview);
-      }
-    };
-    reader.readAsDataURL(file);
-
-    // 上传图片进行OCR识别
-    const formData = new FormData();
-    formData.append('image', file);
+    setIsParsing(true);
+    setError('');
+    setParsedNote(null);
+    setResult(null);
 
     try {
-      const response = await fetch('/api/ocr-upload', {
+      // 先从分享文本中提取信息
+      const extracted = extractFromShareText(linkInput);
+
+      const response = await fetch('/api/parse-xiaohongshu', {
         method: 'POST',
-        body: formData
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: linkInput })
       });
 
       const data = await response.json();
-      if (!response.ok || !data.success) {
-        throw new Error(data.error || 'OCR识别失败');
+
+      if (data.success && data.data) {
+        // 优先使用从分享文本提取的标题，其次用API返回的
+        const title = extracted.title || data.data.title || '小红书笔记';
+        const author = extracted.author || data.data.author || '';
+        const content = data.data.content || '';
+        const images = data.data.images || [];
+        const videoUrl = data.data.videoUrl || '';
+        const noteType = data.data.noteType || (videoUrl ? 'video' : 'note');
+        const sourceUrl = data.data.sourceUrl || '';
+
+        // 检查是否获取到有效内容
+        if (content && content.length > 30 && !content.includes('未检测到') && !content.includes('解析遇到')) {
+          setParsedNote({
+            title,
+            content,
+            author,
+            images,
+            videoUrl,
+            noteType,
+            sourceUrl
+          });
+        } else {
+          // 如果内容解析失败但有标题，尝试用AI生成内容参考
+          if (title) {
+            setError(`链接解析受限，但已提取标题："${title}"。\n\n由于小红书的反爬保护，无法自动获取正文内容。\n请先在小红书APP中复制正文后再次尝试。`);
+          } else {
+            setError('小红书限制了外部访问，无法解析此笔记。请尝试其他笔记链接。');
+          }
+        }
+      } else {
+        setError(data.error || '解析失败，请检查链接是否正确');
       }
-
-      const extractedText = data.data.text;
-
-      // 尝试分割标题和内容
-      const lines = extractedText.split('\n').filter((line: string) => line.trim());
-      let title = '';
-      let content = extractedText;
-
-      if (lines.length > 1) {
-        // 第一行作为标题，其余作为内容
-        title = lines[0].trim();
-        content = lines.slice(1).join('\n').trim();
-      } else if (lines.length === 1) {
-        // 只有一行，作为标题，内容为空
-        title = lines[0].trim();
-        content = '';
-      }
-
-      setOriginalTitle(title);
-      setOriginalContent(content);
-      setIsContentParsed(true);
-
-    } catch (error: unknown) {
-      const message = getErrorMessage(error);
-      console.error('OCR识别失败:', error);
-      alert(message || 'OCR识别失败，请重试');
-      setImagePreview('');
-      setUploadedImage(null);
+    } catch (err) {
+      console.error('解析失败:', err);
+      setError('网络错误，请重试');
     } finally {
-      setIsOcrProcessing(false);
+      setIsParsing(false);
     }
   };
 
-  const clearImage = () => {
-    setUploadedImage(null);
-    setImagePreview('');
-    setIsContentParsed(false);
-    setOriginalTitle('');
-    setOriginalContent('');
-  };
+  // AI改写
+  const rewriteContent = async () => {
+    if (!parsedNote || rewriteInFlightRef.current) return;
+    rewriteInFlightRef.current = true;
 
-  const analyzeAndRewrite = async () => {
-    if (!originalTitle.trim() || !originalContent.trim()) {
-      alert('请填写原标题和正文内容');
-      return;
-    }
-
-    setIsAnalyzing(true);
+    setIsRewriting(true);
+    setError('');
     setResult(null);
-    setStreamingContent('');
 
     try {
+      rewriteAbortRef.current?.abort();
+      const controller = new AbortController();
+      rewriteAbortRef.current = controller;
+
       const response = await fetch('/api/ai-rewrite', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          originalTitle,
-          originalContent,
-          style: rewriteStyle,
-          model: selectedModel
-        })
+          originalTitle: parsedNote.title,
+          originalContent: parsedNote.content,
+          style: rewriteStyle
+        }),
+        signal: controller.signal
       });
 
       if (!response.ok || !response.body) {
-        const data = await response.json().catch(() => null);
-        throw new Error(data?.error || '改写失败');
+        throw new Error('改写失败');
       }
 
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
+      let streamFailed = false;
 
       while (true) {
         const { value, done } = await reader.read();
@@ -197,362 +174,327 @@ export default function RewritePage() {
 
         for (const line of lines) {
           if (!line.trim()) continue;
-          const payload = JSON.parse(line) as RewriteStreamPayload;
-          if (payload.type === 'content') {
-            setStreamingContent(prev => prev + payload.data);
-          } else if (payload.type === 'result') {
-            setResult(payload.data);
-            setSelectedTitle(payload.data.newTitles[0] || '');
-            setStreamingContent('');
-          } else if (payload.type === 'error') {
-            throw new Error(payload.data);
-          }
+          try {
+            const payload = JSON.parse(line);
+            if (payload.type === 'error') {
+              setError(payload.data || '改写失败，请重试');
+              streamFailed = true;
+              break;
+            }
+            if (payload.type === 'result') {
+              setResult({
+                newTitles: payload.data.newTitles || [],
+                newContent: payload.data.newContent || '',
+                keyPoints: payload.data.keyPoints || []
+              });
+              setSelectedTitle(payload.data.newTitles?.[0] || '');
+            }
+          } catch { /* ignore */ }
+        }
+
+        if (streamFailed) {
+          try {
+            await reader.cancel();
+          } catch { /* ignore */ }
+          break;
         }
       }
 
-      if (buffer.trim()) {
-        const payload = JSON.parse(buffer) as RewriteStreamPayload;
-        if (payload.type === 'result') {
-          setResult(payload.data);
-          setSelectedTitle(payload.data.newTitles[0] || '');
-          setStreamingContent('');
-        } else if (payload.type === 'error') {
-          throw new Error(payload.data);
-        }
-      }
-    } catch (error: unknown) {
-      const message = getErrorMessage(error);
-      console.error('改写失败:', error);
-      alert(message || '改写失败，请重试');
-    } finally {
-      setIsAnalyzing(false);
-    }
-  };
-
-  const copyToClipboard = async (content: string, showSuccessAlert = true) => {
-    try {
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        await navigator.clipboard.writeText(content);
-      } else {
-        // Fallback for insecure contexts (e.g. HTTP on local network)
-        const textArea = document.createElement("textarea");
-        textArea.value = content;
-
-        // Ensure textarea is not visible but part of DOM
-        textArea.style.position = "fixed";
-        textArea.style.left = "-9999px";
-        textArea.style.top = "0";
-        document.body.appendChild(textArea);
-
-        textArea.focus();
-        textArea.select();
-
+      if (!streamFailed && buffer.trim()) {
         try {
-          document.execCommand('copy');
-        } catch (err) {
-          console.error('Fallback: Oops, unable to copy', err);
-          alert('复制失败，请手动复制');
-          document.body.removeChild(textArea);
-          return false;
-        }
-
-        document.body.removeChild(textArea);
+          const payload = JSON.parse(buffer);
+          if (payload.type === 'error') {
+            setError(payload.data || '改写失败，请重试');
+            return;
+          }
+          if (payload.type === 'result') {
+            setResult({
+              newTitles: payload.data.newTitles || [],
+              newContent: payload.data.newContent || '',
+              keyPoints: payload.data.keyPoints || []
+            });
+            setSelectedTitle(payload.data.newTitles?.[0] || '');
+          }
+        } catch { /* ignore */ }
       }
-
-      if (showSuccessAlert) {
-        alert('内容已复制到剪贴板！');
-      }
-      return true;
     } catch (err) {
-      console.error('Async: Could not copy text: ', err);
-      alert('复制失败，请手动复制');
-      return false;
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        return;
+      }
+      console.error('改写失败:', err);
+      setError('改写失败，请重试');
+    } finally {
+      rewriteInFlightRef.current = false;
+      setIsRewriting(false);
     }
   };
 
-  const getCompleteContent = () => {
+  const copyToClipboard = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      alert('已复制');
+    } catch { alert('复制失败'); }
+  };
+
+  const getFullContent = () => {
     if (!result) return '';
-    const title = selectedTitle || result.newTitles?.[0] || originalTitle || '';
-    const keyPoints = result.keyPoints || [];
-    return `${title}\n\n${result.newContent}\n\n${keyPoints.map(point => `#${point}`).join(' ')}`;
+    const title = selectedTitle || result.newTitles[0] || '';
+    const tags = result.keyPoints.map(t => `#${t}`).join(' ');
+    return `${title}\n\n${result.newContent}\n\n${tags}`;
+  };
+
+  const getPublishPayload = () => {
+    if (!parsedNote) return null;
+    const title = selectedTitle || result?.newTitles?.[0] || parsedNote.title;
+    const content = result?.newContent || parsedNote.content;
+    const tags = result?.keyPoints || [];
+    return {
+      title,
+      content,
+      tags,
+      images: parsedNote.images,
+      videoUrl: parsedNote.videoUrl,
+      noteType: parsedNote.noteType,
+      sourceUrl: parsedNote.sourceUrl
+    };
+  };
+
+  const reset = () => {
+    rewriteAbortRef.current?.abort();
+    rewriteAbortRef.current = null;
+    rewriteInFlightRef.current = false;
+    setIsRewriting(false);
+    setLinkInput('');
+    setParsedNote(null);
+    setResult(null);
+    setError('');
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-pink-50 to-purple-50 pb-20 md:pb-0">
+    <div className="min-h-screen bg-gradient-to-br from-green-50 to-emerald-50 pb-8">
       {/* Header */}
-      <header className="bg-white shadow-sm">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
-          <div className="flex items-center">
-            <Link href="/" className="text-pink-600 mr-4 hover:underline">
-              ← 返回
-            </Link>
-            <h1 className="text-xl font-bold text-gray-900">
-              🔄 爆款&quot;洗稿&quot;/仿写
-            </h1>
-          </div>
+      <header className="bg-white/80 backdrop-blur-md shadow-sm sticky top-0 z-50">
+        <div className="max-w-lg mx-auto px-4 py-4 flex items-center">
+          <Link href="/" className="text-gray-600 mr-4 text-lg hover:text-gray-900">←</Link>
+          <h1 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+            <span className="text-xl">🔗</span> 对标图文
+          </h1>
         </div>
       </header>
 
-      <main className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="grid lg:grid-cols-2 gap-8">
-          {/* 左侧：输入原始内容 */}
-          <div className="bg-white rounded-xl shadow-lg p-6 space-y-6">
-            <h2 className="text-lg font-bold text-gray-900">📸 小红书笔记内容提取</h2>
+      <main className="max-w-lg mx-auto px-4 py-6 space-y-4">
+        {/* Step 1: Link Input */}
+        {!parsedNote && !result && (
+          <div className="bg-white rounded-2xl p-5 shadow-sm">
+            <h2 className="font-bold text-gray-900 mb-3 flex items-center gap-2">
+              <span className="w-6 h-6 rounded-full bg-green-500 text-white text-xs flex items-center justify-center">1</span>
+              粘贴小红书链接
+            </h2>
 
-            <div className="space-y-4">
-              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                <h3 className="font-semibold text-blue-800 mb-2">使用说明：</h3>
-                <ul className="text-sm text-blue-700 space-y-1">
-                  <li>• 截图小红书笔记页面或保存图片</li>
-                  <li>• 上传图片进行OCR文字识别</li>
-                  <li>• 自动提取标题和正文内容</li>
-                  <li>• AI智能改写优化文案</li>
-                </ul>
+            <p className="text-xs text-gray-500 mb-3">
+              在小红书APP中点击"分享"→"复制链接"，然后粘贴到下方
+            </p>
+
+            <textarea
+              value={linkInput}
+              onChange={(e) => setLinkInput(e.target.value)}
+              placeholder={`粘贴分享内容，例如：
+14【怎么没人说这个 - 橘哈哈 | 小红书】😆 https://www.xiaohongshu.com/...`}
+              rows={4}
+              className="w-full px-4 py-3 bg-gray-50 rounded-xl border border-gray-200 focus:ring-2 focus:ring-green-400 focus:border-transparent outline-none text-gray-900 placeholder-gray-400 resize-none text-sm"
+            />
+
+            {error && (
+              <div className="mt-3 p-3 bg-red-50 text-red-600 rounded-xl text-sm whitespace-pre-wrap">
+                {error}
+              </div>
+            )}
+
+            <button
+              onClick={parseLink}
+              disabled={isParsing || !linkInput.trim()}
+              className="w-full mt-4 bg-gradient-to-r from-green-500 to-emerald-500 text-white py-4 rounded-xl font-bold shadow-lg shadow-green-500/25 transition-all active:scale-[0.98] disabled:opacity-50"
+            >
+              {isParsing ? (
+                <span className="flex items-center justify-center gap-2">
+                  <span className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
+                  解析中...
+                </span>
+              ) : '🔍 解析笔记'}
+            </button>
+          </div>
+        )}
+
+        {/* Step 2: Parsed Content & Style Selection */}
+        {parsedNote && !result && (
+          <div className="space-y-4">
+            {/* Parsed Note Preview */}
+            <div className="bg-white rounded-2xl p-5 shadow-sm">
+              <div className="flex items-center justify-between mb-3">
+                <h2 className="font-bold text-gray-900 flex items-center gap-2">
+                  <span className="w-6 h-6 rounded-full bg-green-500 text-white text-xs flex items-center justify-center">✓</span>
+                  原笔记内容
+                </h2>
+                <button onClick={reset} className="text-xs text-gray-500 hover:text-gray-700">
+                  重新解析
+                </button>
               </div>
 
-              {/* 图片上传区域 */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  上传小红书笔记图片 *
-                </label>
-                <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center hover:border-blue-400 transition-colors">
-                  {!imagePreview ? (
-                    <div>
-                      <div className="text-4xl mb-4">📷</div>
-                      <p className="text-gray-600 mb-2">点击上传或拖拽图片到此处</p>
-                      <p className="text-xs text-gray-500">支持 JPG、PNG、WebP 格式，最大 10MB</p>
-                      <input
-                        type="file"
-                        accept="image/*"
-                        onChange={handleImageUpload}
-                        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                        disabled={isOcrProcessing}
-                      />
-                    </div>
-                  ) : (
-                    <div className="relative">
+              {/* Images Preview */}
+              {parsedNote.images && parsedNote.images.length > 0 && (
+                <div className="flex gap-2 mb-3 overflow-x-auto pb-2">
+                  {parsedNote.images.slice(0, 4).map((img, i) => (
+                    <div key={i} className="w-20 h-20 flex-shrink-0 rounded-lg overflow-hidden bg-gray-100">
                       <Image
-                        src={imagePreview}
-                        alt="预览图片"
-                        width={512}
-                        height={512}
+                        src={img}
+                        alt={`图片${i + 1}`}
+                        width={80}
+                        height={80}
+                        className="w-full h-full object-cover"
                         unoptimized
-                        className="mx-auto max-h-64 rounded-lg shadow-sm object-contain"
                       />
-                      <button
-                        onClick={clearImage}
-                        disabled={isOcrProcessing}
-                        className="absolute top-2 right-2 bg-red-500 text-white rounded-full w-6 h-6 flex items-center justify-center hover:bg-red-600 disabled:opacity-50"
-                      >
-                        ×
-                      </button>
-                      {isOcrProcessing && (
-                        <div className="absolute inset-0 bg-white bg-opacity-75 flex items-center justify-center rounded-lg">
-                          <div className="text-center">
-                            <div className="text-2xl mb-2">🔄</div>
-                            <p className="text-sm text-gray-600">正在识别文字...</p>
-                          </div>
-                        </div>
-                      )}
                     </div>
-                  )}
-                  {!imagePreview && (
-                    <input
-                      type="file"
-                      accept="image/*"
-                      onChange={handleImageUpload}
-                      className="hidden"
-                      id="image-upload"
-                      disabled={isOcrProcessing}
-                    />
-                  )}
-                  {!imagePreview && (
-                    <label
-                      htmlFor="image-upload"
-                      className={`inline-block mt-4 px-4 py-2 bg-blue-500 text-white rounded-lg cursor-pointer hover:bg-blue-600 transition-colors ${isOcrProcessing ? 'opacity-50 cursor-not-allowed' : ''
-                        }`}
-                    >
-                      选择图片
-                    </label>
-                  )}
+                  ))}
+                </div>
+              )}
+
+              <div className="space-y-2">
+                <div>
+                  <label className="text-xs text-gray-500">标题</label>
+                  <div className="p-2 bg-gray-50 rounded-lg text-sm text-gray-800 mt-1 font-medium">
+                    {parsedNote.title}
+                  </div>
+                </div>
+                {parsedNote.author && (
+                  <div className="text-xs text-gray-500">
+                    作者：{parsedNote.author}
+                  </div>
+                )}
+                <div>
+                  <label className="text-xs text-gray-500">内容预览</label>
+                  <div className="p-2 bg-gray-50 rounded-lg text-xs text-gray-600 mt-1 max-h-24 overflow-y-auto">
+                    {parsedNote.content.slice(0, 200)}...
+                  </div>
                 </div>
               </div>
+            </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                {modelOptions.map((option) => (
+            {/* Style Selection */}
+            <div className="bg-white rounded-2xl p-5 shadow-sm">
+              <h2 className="font-bold text-gray-900 mb-3 flex items-center gap-2">
+                <span className="w-6 h-6 rounded-full bg-green-500 text-white text-xs flex items-center justify-center">2</span>
+                选择改写风格
+              </h2>
+
+              <div className="grid grid-cols-4 gap-2">
+                {styleOptions.map((opt) => (
                   <button
-                    key={option.value}
-                    onClick={() => setSelectedModel(option.value)}
-                    className={`text-left border rounded-lg p-3 transition-colors ${selectedModel === option.value ? 'border-pink-500 bg-pink-50' : 'border-gray-200 hover:border-pink-200'
+                    key={opt.value}
+                    onClick={() => setRewriteStyle(opt.value as RewriteStyle)}
+                    className={`p-3 rounded-xl border text-center transition-all ${rewriteStyle === opt.value
+                        ? 'border-green-400 bg-green-50'
+                        : 'border-gray-200 hover:border-gray-300'
                       }`}
                   >
-                    <div className="font-semibold text-gray-900">{option.label}</div>
-                    <div className="text-xs text-gray-500 mt-1">{option.description}</div>
+                    <div className="text-xl">{opt.emoji}</div>
+                    <div className="text-xs text-gray-700 mt-1">{opt.label}</div>
                   </button>
                 ))}
               </div>
 
-              {isContentParsed && (
-                <div className="bg-green-50 border border-green-200 rounded-lg p-3">
-                  <p className="text-green-700 text-sm">
-                    ✅ 笔记内容提取成功！请在下方确认或修改内容后开始改写
-                  </p>
-                </div>
-              )}
+              <button
+                onClick={rewriteContent}
+                disabled={isRewriting}
+                className="w-full mt-4 bg-gradient-to-r from-green-500 to-emerald-500 text-white py-4 rounded-xl font-bold shadow-lg transition-all active:scale-[0.98] disabled:opacity-50"
+              >
+                {isRewriting ? '✨ AI改写中...' : '🚀 开始改写'}
+              </button>
+            </div>
+          </div>
+        )}
 
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  改写风格
-                </label>
-                <div className="grid grid-cols-2 gap-2">
-                  {styleOptions.map((option) => (
-                    <button
-                      key={option.value}
-                      onClick={() => setRewriteStyle(option.value as RewriteStyle)}
-                      className={`p-3 rounded-lg border text-left transition-colors ${rewriteStyle === option.value
-                        ? 'border-pink-500 bg-pink-50 text-pink-700'
+        {/* Loading */}
+        {isRewriting && (
+          <div className="bg-white rounded-2xl p-8 shadow-sm text-center">
+            <div className="w-14 h-14 border-4 border-gray-100 border-t-green-500 rounded-full animate-spin mx-auto mb-4"></div>
+            <p className="text-gray-800 font-medium">AI正在改写中...</p>
+            <p className="text-gray-500 text-xs mt-1">预计10-15秒完成</p>
+          </div>
+        )}
+
+        {/* Result */}
+        {result && (
+          <div className="bg-white rounded-2xl p-5 shadow-sm">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="font-bold text-gray-900 flex items-center gap-2">
+                <span className="text-xl">🎉</span> 改写完成
+              </h2>
+              <button onClick={reset} className="text-sm text-green-600 hover:text-green-700 font-medium">
+                改写其他笔记
+              </button>
+            </div>
+
+            {/* New Titles */}
+            <div className="mb-4">
+              <label className="text-sm font-medium text-gray-700 mb-2 block">选择新标题</label>
+              <div className="space-y-2">
+                {result.newTitles.map((title, i) => (
+                  <div
+                    key={i}
+                    onClick={() => setSelectedTitle(title)}
+                    className={`p-3 rounded-xl border cursor-pointer transition-all ${selectedTitle === title
+                        ? 'border-green-400 bg-green-50'
                         : 'border-gray-200 hover:border-gray-300'
-                        }`}
-                    >
-                      <div className="font-medium text-sm">{option.label}</div>
-                      <div className="text-xs text-gray-500 mt-1">{option.description}</div>
-                    </button>
+                      }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-gray-900">{title}</span>
+                      {selectedTitle === title && <span className="text-green-500">✓</span>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* New Content */}
+            <div className="mb-4">
+              <div className="flex items-center justify-between mb-2">
+                <label className="text-sm font-medium text-gray-700">改写内容</label>
+                <span className="text-xs text-gray-400">{result.newContent.length} 字</span>
+              </div>
+              <div className="p-4 bg-gray-50 rounded-xl max-h-60 overflow-y-auto">
+                <pre className="text-sm text-gray-800 whitespace-pre-wrap font-sans leading-relaxed">
+                  {result.newContent}
+                </pre>
+              </div>
+            </div>
+
+            {/* Tags */}
+            {result.keyPoints.length > 0 && (
+              <div className="mb-4">
+                <label className="text-sm font-medium text-gray-700 mb-2 block">推荐标签</label>
+                <div className="flex flex-wrap gap-2">
+                  {result.keyPoints.map((tag, i) => (
+                    <span key={i} className="px-3 py-1 bg-green-50 text-green-600 text-sm rounded-full">
+                      #{tag}
+                    </span>
                   ))}
                 </div>
               </div>
+            )}
 
-              {isContentParsed && (
-                <button
-                  onClick={analyzeAndRewrite}
-                  disabled={isAnalyzing || !originalTitle.trim() || !originalContent.trim()}
-                  className="w-full bg-gradient-to-r from-pink-500 to-purple-600 text-white py-3 rounded-lg font-semibold hover:from-pink-600 hover:to-purple-700 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
-                >
-                  {isAnalyzing ? '🔄 正在分析改写...' : '🚀 开始改写'}
-                </button>
-              )}
-
-              {isAnalyzing && (
-                <div className="mt-3 flex items-center text-pink-600 text-sm">
-                  <span className="text-2xl animate-bounce origin-bottom">✍️</span>
-                  <span className="ml-2">AI 正在写作（预计 10~15 秒完成），请稍候…</span>
-                </div>
-              )}
+            {/* Actions */}
+            <div className="flex gap-3 pt-2">
+              <button
+                onClick={() => copyToClipboard(getFullContent())}
+                className="flex-1 bg-gray-100 text-gray-700 py-3 rounded-xl font-medium hover:bg-gray-200 transition-colors"
+              >
+                📋 复制全部
+              </button>
+              <PublishButton content={getFullContent()} publishData={getPublishPayload() || undefined} className="flex-1" />
             </div>
           </div>
-
-          {/* 右侧：改写结果 */}
-          <div className="bg-white rounded-xl shadow-lg p-6">
-            <h2 className="text-lg font-bold text-gray-900 mb-6">改写结果</h2>
-
-            {isAnalyzing && livePreview && (
-              <div className="mb-6">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-sm font-medium text-gray-700">实时生成中…</span>
-                  <span className="text-xs text-gray-400">模型输出将实时显示</span>
-                </div>
-                <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-lg whitespace-pre-wrap">
-                  <pre className="text-sm text-gray-800 whitespace-pre-wrap">
-                    {livePreview}
-                  </pre>
-                </div>
-              </div>
-            )}
-
-            {showResultPanel ? (
-              <div className="space-y-6">
-                {/* 新标题选择 */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    新标题（点击选择）
-                  </label>
-                  <div className="space-y-2">
-                    {displayTitles.map((title, index) => (
-                      <div
-                        key={index}
-                        onClick={() => setSelectedTitle(title)}
-                        className={`p-3 rounded-lg border cursor-pointer transition-colors ${selectedTitle === title
-                          ? 'border-pink-500 bg-pink-50'
-                          : 'border-gray-200 hover:border-gray-300'
-                          }`}
-                      >
-                        <div className="flex items-center justify-between">
-                          <span className="font-medium">{title}</span>
-                          {selectedTitle === title && (
-                            <span className="text-pink-600">✓</span>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                {/* 新内容 */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    改写内容
-                  </label>
-                  <div className="p-4 bg-gray-50 rounded-lg border border-gray-200">
-                    <pre className="text-sm text-gray-900 whitespace-pre-wrap">
-                      {displayContent}
-                    </pre>
-                  </div>
-                </div>
-
-                {/* 操作按钮 */}
-                <div className="flex flex-col sm:flex-row gap-3 pt-4">
-                  <button
-                    onClick={() => copyToClipboard(getCompleteContent())}
-                    disabled={!result}
-                    className="flex-1 bg-blue-500 text-white py-2 rounded-lg hover:bg-blue-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    📋 复制完整内容
-                  </button>
-                  <button
-                    onClick={() => copyToClipboard(selectedTitle)}
-                    disabled={!result}
-                    className="flex-1 bg-purple-500 text-white py-2 rounded-lg hover:bg-purple-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    📝 仅复制标题
-                  </button>
-                  <button
-                    onClick={async () => {
-                      const content = getCompleteContent();
-                      if (content) {
-                        const success = await copyToClipboard(content, false);
-                        if (success) {
-                          const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-                          if (isMobile) {
-                            window.location.href = 'xhsdiscover://post';
-                          } else {
-                            window.open('https://creator.xiaohongshu.com/publish/publish', '_blank');
-                          }
-                        }
-                      }
-                    }}
-                    disabled={!result}
-                    className="flex-1 bg-red-500 text-white py-2 rounded-lg hover:bg-red-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    🚀 去发布
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <div className="text-center py-12">
-                <div className="text-6xl mb-4">{isAnalyzing ? '✍️' : '🔗'}</div>
-                <p className="text-gray-500">
-                  {isAnalyzing
-                    ? '模型正在生成内容，请稍等片刻…'
-                    : '粘贴小红书笔记链接并解析内容后，即可获得改写版本'}
-                </p>
-                {!isAnalyzing && !isContentParsed && (
-                  <div className="mt-4 text-sm text-gray-400">
-                    <p>💡 提示：请在左侧输入小红书笔记链接开始使用</p>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        </div>
+        )}
       </main>
     </div>
   );

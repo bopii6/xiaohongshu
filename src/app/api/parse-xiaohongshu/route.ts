@@ -19,6 +19,9 @@ interface ParsedNoteData {
   author: string;
   tags: string[];
   images: string[];
+  videoUrl?: string;
+  noteType?: string;
+  sourceUrl?: string;
   stats: ParsedNoteStats;
   extractionMethod?: string;
   debugInfo?: string;
@@ -48,31 +51,381 @@ function getErrorMessage(error: unknown): string {
   }
 }
 
-// 从混合文本中提取小红书链接
-function extractXiaohongshuUrl(input: string): string | null {
-  // 匹配小红书链接的正则表达式
+function normalizeImageUrl(url: string): string {
+  const trimmed = url.trim()
+    .replace(/\\u002F/g, '/')
+    .replace(/&amp;/g, '&');
+  if (trimmed.startsWith('//')) {
+    return `https:${trimmed}`;
+  }
+  return trimmed;
+}
+
+function extractImageUrls(html: string): string[] {
+  const candidates = new Set<string>();
+  const push = (url: string) => {
+    const normalized = normalizeImageUrl(url);
+    if (!/^https?:\/\//i.test(normalized)) return;
+    if (normalized.startsWith('data:')) return;
+    candidates.add(normalized);
+  };
+
+  const metaPatterns = [
+    /<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/gi,
+    /<meta[^>]+name=["']twitter:image["'][^>]+content=["']([^"']+)["']/gi
+  ];
+  for (const pattern of metaPatterns) {
+    let match: RegExpExecArray | null;
+    while ((match = pattern.exec(html)) !== null) {
+      if (match[1]) push(match[1]);
+    }
+  }
+
+  const imgTagPattern = /<img[^>]+src=["']([^"']+)["']/gi;
+  let imgMatch: RegExpExecArray | null;
+  while ((imgMatch = imgTagPattern.exec(html)) !== null) {
+    if (imgMatch[1]) push(imgMatch[1]);
+  }
+
+  const jsonUrlPattern = /"url"\s*:\s*"([^"]+)"/gi;
+  let jsonMatch: RegExpExecArray | null;
+  while ((jsonMatch = jsonUrlPattern.exec(html)) !== null) {
+    if (jsonMatch[1]) push(jsonMatch[1]);
+  }
+
+  const directImagePattern = /https?:\/\/[^"'\\s>]+?\.(?:jpg|jpeg|png|webp)(?:\?[^"'\\s>]*)?/gi;
+  let directMatch: RegExpExecArray | null;
+  while ((directMatch = directImagePattern.exec(html)) !== null) {
+    if (directMatch[0]) push(directMatch[0]);
+  }
+
+  const filtered = Array.from(candidates).filter(url => {
+    const lower = url.toLowerCase();
+    if (!/\.(jpg|jpeg|png|webp)(\?|$)/.test(lower)) return false;
+    return /xiaohongshu|xhscdn/.test(lower);
+  });
+
+  return filtered.slice(0, 12);
+}
+
+interface StructuredNoteData {
+  title?: string;
+  content?: string;
+  author?: string;
+  images?: string[];
+  videoUrl?: string;
+  noteType?: string;
+}
+
+function firstString(value: unknown, keys: string[]): string | null {
+  if (!value || typeof value !== 'object') return null;
+  const record = value as Record<string, unknown>;
+  for (const key of keys) {
+    const candidate = record[key];
+    if (typeof candidate === 'string' && candidate.trim().length > 0) {
+      return candidate.trim();
+    }
+  }
+  return null;
+}
+
+function extractImagesFromList(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const urls: string[] = [];
+  const urlKeys = [
+    'url',
+    'urlDefault',
+    'url_default',
+    'urlPre',
+    'url_pre',
+    'urlOrigin',
+    'url_origin',
+    'originUrl',
+    'origin_url',
+    'original_url',
+    'url_list'
+  ];
+
+  for (const item of value) {
+    if (typeof item === 'string') {
+      urls.push(normalizeImageUrl(item));
+      continue;
+    }
+    if (!item || typeof item !== 'object') continue;
+    const record = item as Record<string, unknown>;
+    for (const key of urlKeys) {
+      const candidate = record[key];
+      if (typeof candidate === 'string' && candidate.trim().length > 0) {
+        urls.push(normalizeImageUrl(candidate));
+      } else if (Array.isArray(candidate)) {
+        for (const nested of candidate) {
+          if (typeof nested === 'string' && nested.trim().length > 0) {
+            urls.push(normalizeImageUrl(nested));
+          }
+        }
+      }
+    }
+  }
+  return urls;
+}
+
+function collectStringValues(value: unknown, out: string[]) {
+  if (!value) return;
+  if (typeof value === 'string') {
+    out.push(value);
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      collectStringValues(item, out);
+    }
+    return;
+  }
+  if (typeof value === 'object') {
+    for (const item of Object.values(value as Record<string, unknown>)) {
+      collectStringValues(item, out);
+    }
+  }
+}
+
+function looksLikeVideoUrl(url: string): boolean {
+  const lower = url.toLowerCase();
+  if (lower.includes('.mp4') || lower.includes('.m3u8')) return true;
+  return lower.includes('xhscdn') && lower.includes('video');
+}
+
+function extractVideoUrls(value: unknown): string[] {
+  const raw: string[] = [];
+  collectStringValues(value, raw);
+  const filtered = raw
+    .map(normalizeImageUrl)
+    .filter(url => /^https?:\/\//i.test(url) && looksLikeVideoUrl(url));
+  return Array.from(new Set(filtered));
+}
+
+function pickPreferredVideoUrl(urls: string[]): string | undefined {
+  const mp4 = urls.find(url => url.toLowerCase().includes('.mp4'));
+  return mp4 || urls[0];
+}
+
+function sanitizeJsonLike(raw: string): string {
+  return raw
+    .replace(/\bundefined\b/g, 'null')
+    .replace(/\bNaN\b/g, 'null')
+    .replace(/\bInfinity\b/g, 'null');
+}
+
+function extractInitialState(html: string): Record<string, unknown> | null {
+  const match = html.match(/window\.__INITIAL_STATE__\s*=\s*({[\s\S]*?})\s*<\/script>/i);
+  if (!match || !match[1]) return null;
+  try {
+    return JSON.parse(sanitizeJsonLike(match[1])) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+function extractNoteFromData(noteData: Record<string, unknown>): StructuredNoteData | null {
+  const title = firstString(noteData, ['title', 'noteTitle', 'displayTitle', 'display_title', 'shareTitle']);
+  const content = firstString(noteData, ['desc', 'description', 'content', 'noteDesc', 'note_content']);
+  const rawType = firstString(noteData, ['type', 'noteType', 'note_type']);
+  let author = firstString(noteData, ['author', 'nickname', 'userName', 'username', 'user_name']);
+  if (!author && noteData.user && typeof noteData.user === 'object') {
+    author = firstString(noteData.user, ['nickname', 'name', 'userName', 'username']);
+  }
+
+  let images: string[] = [];
+  images = images.concat(extractImagesFromList(noteData.imageList));
+  images = images.concat(extractImagesFromList(noteData.image_list));
+  images = images.concat(extractImagesFromList(noteData.images));
+  images = images.concat(extractImagesFromList(noteData.imgs));
+
+  const videoCandidates = [
+    ...extractVideoUrls(noteData.video),
+    ...extractVideoUrls(noteData.videoInfo),
+    ...extractVideoUrls(noteData.video_info),
+    ...extractVideoUrls(noteData.media),
+    ...extractVideoUrls(noteData.mediaInfo),
+    ...extractVideoUrls(noteData.stream),
+    ...extractVideoUrls(noteData)
+  ];
+  const videoUrl = pickPreferredVideoUrl(videoCandidates);
+  const noteType = videoUrl || (rawType && rawType.toLowerCase() !== 'normal') ? 'video' : 'note';
+
+  if (!title && !content && images.length === 0 && !videoUrl) return null;
+  const uniqueImages = Array.from(new Set(images)).filter(url => url.length > 0);
+
+  return {
+    title: title ?? undefined,
+    content: content ?? undefined,
+    author: author ?? undefined,
+    images: uniqueImages,
+    videoUrl: videoUrl,
+    noteType: noteType
+  };
+}
+
+function extractNoteFromInitialState(html: string, noteId?: string): StructuredNoteData | null {
+  const state = extractInitialState(html);
+  if (!state) return null;
+
+  const queue: unknown[] = [state];
+  const visited = new Set<unknown>();
+  let noteDetailMap: Record<string, unknown> | null = null;
+
+  while (queue.length > 0) {
+    const current = queue.shift();
+    if (!current || typeof current !== 'object') continue;
+    if (visited.has(current)) continue;
+    visited.add(current);
+
+    if (Array.isArray(current)) {
+      queue.push(...current);
+      continue;
+    }
+
+    const record = current as Record<string, unknown>;
+    if (record.noteDetailMap && typeof record.noteDetailMap === 'object') {
+      noteDetailMap = record.noteDetailMap as Record<string, unknown>;
+      break;
+    }
+
+    queue.push(...Object.values(record));
+  }
+
+  if (!noteDetailMap) return null;
+
+  const resolveEntry = (entry: unknown): StructuredNoteData | null => {
+    if (!entry || typeof entry !== 'object') return null;
+    const record = entry as Record<string, unknown>;
+    if (record.note && typeof record.note === 'object') {
+      return extractNoteFromData(record.note as Record<string, unknown>);
+    }
+    return extractNoteFromData(record);
+  };
+
+  if (noteId && noteDetailMap[noteId]) {
+    const resolved = resolveEntry(noteDetailMap[noteId]);
+    if (resolved) return resolved;
+  }
+
+  for (const entry of Object.values(noteDetailMap)) {
+    const resolved = resolveEntry(entry);
+    if (resolved) return resolved;
+  }
+
+  return null;
+}
+
+function extractStructuredNote(html: string, noteId?: string): StructuredNoteData | null {
+  const initialStateNote = extractNoteFromInitialState(html, noteId);
+  if (initialStateNote) return initialStateNote;
+
+  const nextDataMatch = html.match(/<script[^>]+id=["']__NEXT_DATA__["'][^>]*>([\s\S]*?)<\/script>/i);
+  if (!nextDataMatch || !nextDataMatch[1]) return null;
+
+  try {
+    const json = JSON.parse(nextDataMatch[1]);
+    const queue: unknown[] = [json];
+    const visited = new Set<unknown>();
+    let depth = 0;
+
+    while (queue.length > 0 && depth < 7) {
+      const current = queue.shift();
+      depth += 1;
+      if (!current || typeof current !== 'object') continue;
+      if (visited.has(current)) continue;
+      visited.add(current);
+
+      if (Array.isArray(current)) {
+        queue.push(...current);
+        continue;
+      }
+
+      const record = current as Record<string, unknown>;
+      const recordNote = record.note && typeof record.note === 'object'
+        ? (record.note as Record<string, unknown>)
+        : null;
+      const recordNoteId = recordNote
+        ? firstString(recordNote, ['noteId', 'note_id', 'id', 'noteIdStr', 'note_id_str'])
+        : firstString(record, ['noteId', 'note_id', 'id', 'noteIdStr', 'note_id_str']);
+
+      if (!noteId || (recordNoteId && recordNoteId === noteId)) {
+        const candidate = recordNote ? extractNoteFromData(recordNote) : extractNoteFromData(record);
+        if (candidate) return candidate;
+      }
+
+      queue.push(...Object.values(record));
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
+}
+
+// 从分享文本中提取标题和作者信息
+interface ShareTextExtraction {
+  title: string;
+  author: string;
+  url: string | null;
+}
+
+function extractFromShareText(input: string): ShareTextExtraction {
+  let title = '';
+  let author = '';
+  let url: string | null = null;
+
+  // 提取【】中的内容：格式通常是 【标题 - 作者 | 小红书】
+  const bracketMatch = input.match(/【([^】]+)】/);
+  if (bracketMatch) {
+    const bracketContent = bracketMatch[1];
+    // 尝试分割标题和作者
+    const parts = bracketContent.split(/\s*[-|－]\s*/);
+    if (parts.length >= 2) {
+      title = parts[0].trim();
+      // 作者通常在第二部分，排除"小红书"等平台名
+      const possibleAuthor = parts[1].trim();
+      if (!possibleAuthor.includes('小红书')) {
+        author = possibleAuthor;
+      }
+    } else {
+      title = bracketContent.replace(/\s*\|\s*小红书.*$/, '').trim();
+    }
+  }
+
+  // 提取URL
   const urlPatterns = [
-    /https?:\/\/www\.xiaohongshu\.com\/explore\/[a-f0-9]+/i,
-    /https?:\/\/www\.xiaohongshu\.com\/discovery\/item\/[a-f0-9]+/i,
-    /https?:\/\/xhslink\.com\/[a-zA-Z0-9\/]+/i,
-    /www\.xiaohongshu\.com\/explore\/[a-f0-9]+/i,
-    /www\.xiaohongshu\.com\/discovery\/item\/[a-f0-9]+/i,
-    /xhslink\.com\/[a-zA-Z0-9\/]+/i
+    /https?:\/\/www\.xiaohongshu\.com\/explore\/[a-f0-9]+[^\s]*/i,
+    /https?:\/\/www\.xiaohongshu\.com\/discovery\/item\/[a-f0-9]+[^\s]*/i,
+    /https?:\/\/xhslink\.com\/[^\s]+/i,
+    /www\.xiaohongshu\.com\/explore\/[a-f0-9]+[^\s]*/i,
+    /www\.xiaohongshu\.com\/discovery\/item\/[a-f0-9]+[^\s]*/i,
+    /xhslink\.com\/[^\s]+/i
   ];
 
   for (const pattern of urlPatterns) {
     const match = input.match(pattern);
     if (match) {
-      let url = match[0];
-      // 如果没有协议前缀，添加 https://
+      url = match[0];
       if (!url.match(/^https?:\/\//)) {
         url = 'https://' + url;
       }
-      return url;
+      break;
     }
   }
 
-  return null;
+  return { title, author, url };
+}
+
+// 从混合文本中提取小红书链接（保留向后兼容）
+function extractXiaohongshuUrl(input: string): string | null {
+  return extractFromShareText(input).url;
+}
+
+function extractNoteIdFromUrl(url: string): string | null {
+  const match = url.match(/\/(?:explore|discovery\/item)\/([a-f0-9]+)/i);
+  return match ? match[1] : null;
 }
 
 // 多种高级User-Agent池
@@ -90,6 +443,13 @@ const USER_AGENTS = [
 // 随机获取User-Agent
 function getRandomUserAgent(): string {
   return USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)];
+}
+
+const XHS_COOKIE = process.env.XHS_COOKIE;
+
+function withCookie(headers: Record<string, string>): Record<string, string> {
+  if (!XHS_COOKIE) return headers;
+  return { ...headers, Cookie: XHS_COOKIE };
 }
 
 // 方法1: 使用Jina AI代理（最稳定）
@@ -159,7 +519,9 @@ async function tryDirectRequest(url: string): Promise<FetchContentResult> {
       'Sec-Fetch-Mode': 'navigate',
       'Sec-Fetch-Site': 'none',
       'Sec-Fetch-User': '?1',
-      'Cache-Control': 'max-age=0'
+      'Cache-Control': 'max-age=0',
+      'Referer': url,
+      'Origin': 'https://www.xiaohongshu.com'
     },
     {
       'User-Agent': getRandomUserAgent(),
@@ -168,7 +530,9 @@ async function tryDirectRequest(url: string): Promise<FetchContentResult> {
       'Accept-Encoding': 'gzip, deflate',
       'DNT': '1',
       'Connection': 'keep-alive',
-      'Upgrade-Insecure-Requests': '1'
+      'Upgrade-Insecure-Requests': '1',
+      'Referer': url,
+      'Origin': 'https://www.xiaohongshu.com'
     }
   ];
 
@@ -176,7 +540,7 @@ async function tryDirectRequest(url: string): Promise<FetchContentResult> {
     try {
       const response = await fetch(url, {
         method: 'GET',
-        headers: headers
+        headers: withCookie(headers)
       });
 
       if (response.ok) {
@@ -352,14 +716,14 @@ async function tryXhslinkRedirect(url: string): Promise<FetchContentResult> {
       try {
         const response = await fetch(url, {
           method: 'GET',
-          headers: {
+          headers: withCookie({
             'User-Agent': getRandomUserAgent(),
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
             'Accept-Language': 'zh-CN,zh;q=0.8,en-US;q=0.5,en;q=0.3',
             'Accept-Encoding': 'gzip, deflate, br',
             'Connection': 'keep-alive',
             'Upgrade-Insecure-Requests': '1'
-          },
+          }),
           redirect: 'follow' // 允许重定向
         });
 
@@ -386,22 +750,29 @@ async function tryXhslinkRedirect(url: string): Promise<FetchContentResult> {
 // 检测是否为登录页面或错误页面
 function isLoginPage(html: string): boolean {
   const loginIndicators = [
-    /登录/i,
+    /小红书登录/i,
+    /手机号登录/i,
+    /验证码登录/i,
+    /账号登录/i,
+    /微信登录/i,
     /login/i,
     /sign.?in/i,
-    /验证/i,
-    /验证码/i,
-    /手机号/i,
-    /密码/i,
-    /微信登录/i,
-    /账号登录/i
+    /passport/i
   ];
 
-  return loginIndicators.some(pattern => pattern.test(html));
+  if (!loginIndicators.some(pattern => pattern.test(html))) {
+    return false;
+  }
+
+  return !hasValidContent(html);
 }
 
 // 检测是否包含有效的笔记内容
 function hasValidContent(html: string): boolean {
+  if (extractStructuredNote(html)) {
+    return true;
+  }
+
   const contentIndicators = [
     /class="[^"]*content[^"]*"/i,
     /class="[^"]*desc[^"]*"/i,
@@ -414,10 +785,11 @@ function hasValidContent(html: string): boolean {
 }
 
 // 解析HTML内容提取小红书笔记信息
-function parseXiaohongshuContent(html: string, extractedTitle: string): ParsedNoteData {
+function parseXiaohongshuContent(html: string, extractedTitle: string, noteId?: string): ParsedNoteData {
   try {
+    const structured = extractStructuredNote(html, noteId);
     // 首先检查是否被重定向到登录页面
-    if (isLoginPage(html)) {
+    if (!structured && isLoginPage(html)) {
       return {
         title: extractedTitle || '检测到登录页面',
         content: `❌ 小红书要求登录才能查看此笔记内容\n\n🔄 系统检测到访问被重定向到登录页面，这通常是因为：\n\n1. 笔记设置了隐私权限\n2. 小红书加强了反爬虫措施\n3. 需要登录验证才能查看\n\n✨ 我们已经提取到了笔记标题："${extractedTitle || '无标题'}"\n\n📝 请手动复制粘贴笔记的正文内容到下方输入框，然后开始智能改写。\n\n💡 技术提示：建议直接在小红书App内查看并复制笔记内容，然后粘贴到改写工具中。`,
@@ -430,7 +802,7 @@ function parseXiaohongshuContent(html: string, extractedTitle: string): ParsedNo
     }
 
     // 检查是否包含有效内容
-    if (!hasValidContent(html)) {
+    if (!structured && !hasValidContent(html)) {
       return {
         title: extractedTitle || '未检测到笔记内容',
         content: `⚠️ 未检测到有效的笔记内容\n\n🔍 系统成功访问了页面，但没有找到预期的笔记内容，这可能是因为：\n\n1. 链接格式不正确\n2. 笔记已被删除或隐藏\n3. 页面结构发生了变化\n\n✨ 我们已经提取到了笔记标题："${extractedTitle || '无标题'}"\n\n📝 请手动复制粘贴笔记的正文内容到下方输入框，然后开始智能改写。`,
@@ -443,7 +815,7 @@ function parseXiaohongshuContent(html: string, extractedTitle: string): ParsedNo
     }
 
     // 提取标题
-    let title = extractedTitle;
+    let title = structured?.title || extractedTitle || "";
     if (!title) {
       const titlePatterns = [
         /<title[^>]*>([^<]+)<\/title>/i,
@@ -465,26 +837,28 @@ function parseXiaohongshuContent(html: string, extractedTitle: string): ParsedNo
     }
 
     // 提取内容 - 使用更精确的 selectors
-    let content = '';
+    let content = structured?.content || '';
 
-    // 尝试更精确的内容提取模式
-    const contentPatterns = [
-      /<div[^>]+class="[^"]*content[^"]*"[^>]*>([\s\S]*?)<\/div>/i,
-      /<div[^>]+class="[^"]*desc[^"]*"[^>]*>([\s\S]*?)<\/div>/i,
-      /<div[^>]+class="[^"]*note[^"]*"[^>]*>([\s\S]*?)<\/div>/i,
-      /<div[^>]+data-ecom[^>]*>([\s\S]*?)<\/div>/i,
-      /<meta[^>]+name="description"[^>]+content="([^"]+)"/i,
-      /<meta[^>]+property="og:description"[^>]+content="([^"]+)"/i,
-      /<p[^>]*class="[^"]*content[^"]*"[^>]*>([\s\S]*?)<\/p>/i
-    ];
+    if (!content || content.length < 20) {
+      // 尝试更精确的内容提取模式
+      const contentPatterns = [
+        /<div[^>]+class="[^"]*content[^"]*"[^>]*>([\s\S]*?)<\/div>/i,
+        /<div[^>]+class="[^"]*desc[^"]*"[^>]*>([\s\S]*?)<\/div>/i,
+        /<div[^>]+class="[^"]*note[^"]*"[^>]*>([\s\S]*?)<\/div>/i,
+        /<div[^>]+data-ecom[^>]*>([\s\S]*?)<\/div>/i,
+        /<meta[^>]+name="description"[^>]+content="([^"]+)"/i,
+        /<meta[^>]+property="og:description"[^>]+content="([^"]+)"/i,
+        /<p[^>]*class="[^"]*content[^"]*"[^>]*>([\s\S]*?)<\/p>/i
+      ];
 
-    for (const pattern of contentPatterns) {
-      const match = html.match(pattern);
-      if (match && match[1]) {
-        const cleanContent = match[1].replace(/<[^>]*>/g, '').trim();
-        if (cleanContent.length > 20 && !cleanContent.includes('登录') && !cleanContent.includes('小红书')) {
-          content = cleanContent;
-          break;
+      for (const pattern of contentPatterns) {
+        const match = html.match(pattern);
+        if (match && match[1]) {
+          const cleanContent = match[1].replace(/<[^>]*>/g, '').trim();
+          if (cleanContent.length > 20 && !cleanContent.includes('登录') && !cleanContent.includes('小红书')) {
+            content = cleanContent;
+            break;
+          }
         }
       }
     }
@@ -532,13 +906,18 @@ function parseXiaohongshuContent(html: string, extractedTitle: string): ParsedNo
 
     // 提取标签和话题
     const tags = extractTags(content + ' ' + title);
+    const images = structured?.images ?? [];
+    const videoUrl = structured?.videoUrl;
+    const noteType = structured?.noteType;
 
     return {
       title: title || extractedTitle || '小红书笔记',
       content: content,
       author: author,
       tags: tags,
-      images: [],
+      images: images.length > 0 ? images : extractImageUrls(html),
+      videoUrl: videoUrl,
+      noteType: noteType,
       stats: { likes: 0, comments: 0, shares: 0 },
       contentFound: content.length > 50
     };
@@ -563,14 +942,21 @@ async function parseXiaohongshuUrl(input: string): Promise<ParseResult> {
   try {
     console.log('🚀 开始高级解析小红书链接:', input);
 
-    // 从输入中提取真实的小红书链接
-    const actualUrl = extractXiaohongshuUrl(input);
+    // 从分享文本中提取所有信息
+    const shareTextInfo = extractFromShareText(input);
+    const actualUrl = shareTextInfo.url;
+    const extractedTitle = shareTextInfo.title;
+    const extractedAuthor = shareTextInfo.author;
+    const noteId = actualUrl ? extractNoteIdFromUrl(actualUrl) : null;
+
+    console.log('📝 从分享文本提取: 标题=', extractedTitle, '作者=', extractedAuthor);
+
     if (!actualUrl) {
       return {
         success: true,
         data: {
           title: '无法提取有效链接',
-          content: `无法从输入内容中识别有效的小红书链接。\n\n支持的小红书链接格式：\n• https://www.xiaohongshu.com/explore/xxxxx\n• https://www.xiaohongshu.com/discovery/item/xxxxx\n• https://xhslink.com/xxxxx\n\n请检查链接格式是否正确，或者手动复制粘贴笔记的标题和内容。`,
+          content: `无法从输入内容中识别有效的小红书链接。\n\n支持的小红书链接格式：\n• https://www.xiaohongshu.com/explore/xxxxx\n• https://www.xiaohongshu.com/discovery/item/xxxxx\n• https://xhslink.com/xxxxx\n\n请检查链接格式是否正确。`,
           author: '无法获取',
           tags: [],
           images: [],
@@ -580,23 +966,16 @@ async function parseXiaohongshuUrl(input: string): Promise<ParseResult> {
     }
 
     console.log('✅ 提取到的链接:', actualUrl);
-
-    // 尝试从原始输入中提取标题
-    let extractedTitle = '';
-    const titleMatch = input.match(/^([^【\s][^【]*?)\s*(?:http|www\.)/);
-    if (titleMatch) {
-      extractedTitle = titleMatch[1].trim();
-      console.log('✅ 提取到的标题:', extractedTitle);
-    }
+    console.log('✅ 提取到的标题:', extractedTitle);
 
     // 🎯 尝试多种高级解析方法
     const methods = [
+      { name: 'Direct Request', func: tryDirectRequest },
       { name: 'Xhslink Redirect', func: tryXhslinkRedirect },
       { name: 'Jina AI', func: tryJinaAI },
       { name: 'R.jina.ai API', func: tryRJinaAPI },
       { name: 'Textise Proxy', func: tryTextiseProxy },
-      { name: 'Multiple Proxies', func: tryMultipleProxies },
-      { name: 'Direct Request', func: tryDirectRequest }
+      { name: 'Multiple Proxies', func: tryMultipleProxies }
     ];
 
     let lastError = '';
@@ -611,13 +990,20 @@ async function parseXiaohongshuUrl(input: string): Promise<ParseResult> {
           console.log(`🎉 ${method.name} 成功! 内容长度: ${result.content.length}`);
 
           // 解析获取到的内容
-          const parsedData = parseXiaohongshuContent(result.content, extractedTitle);
+          const parsedData = parseXiaohongshuContent(result.content, extractedTitle, noteId ?? undefined);
+          if (parsedData.requiresLogin || parsedData.noContent || parsedData.parseError) {
+            return {
+              success: false,
+              error: '无法自动提取该笔记内容，请确认链接可访问且Cookie有效。'
+            };
+          }
 
           return {
             success: true,
             data: {
               ...parsedData,
-              extractionMethod: method.name
+              extractionMethod: method.name,
+              sourceUrl: actualUrl
             }
           };
         } else {
@@ -638,24 +1024,9 @@ async function parseXiaohongshuUrl(input: string): Promise<ParseResult> {
     console.log('💔 所有解析方法都失败了，返回智能降级方案');
 
     // 智能降级：基于标题生成模拟内容提示
-    const fallbackContent = extractedTitle ?
-      `📝 智能改写助手已准备就绪\n\n✨ 成功提取笔记标题："${extractedTitle}"\n\n🚀 请将此笔记的完整内容复制粘贴到下方输入框中，系统将为您：\n• 重新创作吸引人的标题\n• 优化正文表达方式\n• 生成相关的话题标签\n• 提供改写建议和优化方案\n\n💡 专业提示：建议在小红书App内查看完整笔记，然后长按复制内容到这里。\n\n🎯 改写风格支持：相似风格、创意改写、专业版、口语化等多种选择。` :
-      `🔍 笔记链接解析系统\n\n❌ 自动解析遇到技术挑战，这通常是由于：\n\n1️⃣ 小红书平台加强了反爬虫保护\n2️⃣ 笔记设置了隐私权限限制\n3️⃣ 网络环境或连接不稳定\n\n🎯 解决方案：\n• 手动在小红书App内查看笔记\n• 长按复制完整笔记内容\n• 粘贴到下方输入框开始智能改写\n\n✨ 改写功能完全可用，支持多种风格和专业的文案优化！`;
-
     return {
-      success: true,
-      data: {
-        title: extractedTitle || '小红书笔记标题',
-        content: fallbackContent,
-        author: extractedTitle ? '已提取标题' : '需要手动输入',
-        tags: extractedTitle ? extractTags(extractedTitle) : [],
-        images: [],
-        stats: { likes: 0, comments: 0, shares: 0 },
-        extractionMethod: 'Smart Fallback - Manual Input Required',
-        debugInfo: lastError,
-        needsManualInput: true,
-        hasTitle: !!extractedTitle
-      }
+      success: false,
+      error: '自动解析失败，请确认链接可访问且Cookie有效。'
     };
 
   } catch (error: unknown) {
@@ -690,6 +1061,13 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         { success: false, error: '请提供有效的小红书链接' },
         { status: 400 }
+      );
+    }
+
+    if (!process.env.XHS_COOKIE) {
+      return NextResponse.json(
+        { success: false, error: '未配置XHS_COOKIE，无法自动抓取小红书内容' },
+        { status: 500 }
       );
     }
 

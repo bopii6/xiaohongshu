@@ -1,5 +1,6 @@
 export type ZhipuModel =
   | 'glm-4'
+  | 'glm-4v'
   | 'glm-4-plus'
   | 'glm-4-air'
   | 'glm-4-flash'
@@ -10,6 +11,7 @@ export type ZhipuModel =
 
 export const ZHIPU_MODELS: Record<ZhipuModel, { name: string; price: number }> = {
     'glm-4': { name: 'GLM-4', price: 0.1 }, // Price is placeholder
+    'glm-4v': { name: 'GLM-4V', price: 0.1 },
     'glm-4-plus': { name: 'GLM-4 Plus', price: 0.1 },
     'glm-4-air': { name: 'GLM-4 Air', price: 0.001 },
     'glm-4-flash': { name: 'GLM-4 Flash', price: 0 },

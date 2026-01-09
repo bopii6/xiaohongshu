@@ -13,7 +13,7 @@ export function validateZhipuConfig(): ZhipuConfig {
     return {
         apiKey,
         baseUrl: process.env.ZHIPU_BASE_URL || 'https://open.bigmodel.cn/api/paas/v4',
-        defaultModel: (process.env.ZHIPU_MODEL as ZhipuModel | undefined) || 'glm-4.5-flash',
+        defaultModel: (process.env.ZHIPU_MODEL as ZhipuModel | undefined) || 'glm-4-plus',
         timeout: Math.max(normalizedTimeout, 120000),
         maxRetries: parseInt(process.env.ZHIPU_MAX_RETRIES || '3')
     };
