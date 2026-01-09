@@ -40,6 +40,134 @@ MIN_DELAY_MS = int(os.environ.get("XHS_MIN_DELAY_MS", "500"))
 MAX_DELAY_MS = int(os.environ.get("XHS_MAX_DELAY_MS", "2500"))
 STEALTH_MODE = os.environ.get("XHS_STEALTH_MODE", "true").lower() in ("1", "true", "yes")
 
+# Cookie persistence configuration (learned from xiaohongshu-mcp)
+COOKIE_FILE = Path(os.environ.get("XHS_COOKIE_FILE", "")).expanduser() if os.environ.get("XHS_COOKIE_FILE") else None
+COOKIE_AUTO_SAVE = os.environ.get("XHS_COOKIE_AUTO_SAVE", "true").lower() in ("1", "true", "yes")
+
+# Rate limiting configuration (learned from xiaohongshu-mcp)
+DAILY_LIMIT = int(os.environ.get("XHS_DAILY_LIMIT", "50"))  # xiaohongshu-mcp: 50 per day
+MIN_INTERVAL_SECONDS = int(os.environ.get("XHS_MIN_INTERVAL_SECONDS", "1800"))  # 30 minutes
+PUBLISH_LOG_FILE = Path(os.environ.get("XHS_PUBLISH_LOG", "")).expanduser() if os.environ.get("XHS_PUBLISH_LOG") else None
+
+
+# ============= Cookie Persistence Functions =============
+
+def get_cookie_file_path(base_dir):
+    """Get cookie file path, create if needed."""
+    if COOKIE_FILE:
+        return COOKIE_FILE
+    path = Path(base_dir) / "xhs_cookies.json"
+    return path
+
+
+def load_cookies_from_file(path):
+    """Load cookies from JSON file."""
+    try:
+        if path.exists():
+            cookies = json.loads(path.read_text(encoding="utf-8"))
+            log_step(f"loaded {len(cookies)} cookies from {path}")
+            return cookies
+    except Exception as e:
+        log_step(f"failed to load cookies: {e}")
+    return None
+
+
+def save_cookies_to_file(cookies, path):
+    """Save cookies to JSON file."""
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(cookies, indent=2, ensure_ascii=False), encoding="utf-8")
+        log_step(f"saved {len(cookies)} cookies to {path}")
+    except Exception as e:
+        log_step(f"failed to save cookies: {e}")
+
+
+async def save_context_cookies(context, path):
+    """Save cookies from browser context to file."""
+    if not COOKIE_AUTO_SAVE:
+        return
+    try:
+        cookies = await context.cookies()
+        save_cookies_to_file(cookies, path)
+    except Exception as e:
+        log_step(f"failed to save context cookies: {e}")
+
+
+# ============= Rate Limiting Functions =============
+
+def get_publish_log_path(base_dir):
+    """Get publish log file path."""
+    if PUBLISH_LOG_FILE:
+        return PUBLISH_LOG_FILE
+    return Path(base_dir) / "publish_history.json"
+
+
+def load_publish_history(path):
+    """Load publish history from file."""
+    try:
+        if path.exists():
+            return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+    return {"publishes": []}
+
+
+def save_publish_history(history, path):
+    """Save publish history to file."""
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(history, indent=2, ensure_ascii=False), encoding="utf-8")
+    except Exception as e:
+        log_step(f"failed to save publish history: {e}")
+
+
+def check_rate_limit(base_dir):
+    """
+    Check if we can publish based on rate limits.
+    Returns (can_publish, reason_if_not).
+    """
+    log_path = get_publish_log_path(base_dir)
+    history = load_publish_history(log_path)
+    
+    now = time.time()
+    today_start = now - (now % 86400)  # Start of today (UTC)
+    
+    # Filter publishes from today
+    today_publishes = [p for p in history.get("publishes", []) if p.get("timestamp", 0) >= today_start]
+    
+    # Check daily limit
+    if len(today_publishes) >= DAILY_LIMIT:
+        return False, f"达到每日发布上限 ({DAILY_LIMIT} 篇)"
+    
+    # Check minimum interval
+    if today_publishes:
+        last_publish = max(p.get("timestamp", 0) for p in today_publishes)
+        elapsed = now - last_publish
+        if elapsed < MIN_INTERVAL_SECONDS:
+            remaining = int(MIN_INTERVAL_SECONDS - elapsed)
+            return False, f"距离上次发布时间不足，请等待 {remaining // 60} 分钟"
+    
+    return True, None
+
+
+def record_publish(base_dir, title):
+    """Record a successful publish."""
+    log_path = get_publish_log_path(base_dir)
+    history = load_publish_history(log_path)
+    
+    history.setdefault("publishes", []).append({
+        "timestamp": time.time(),
+        "title": title[:50],
+        "date": time.strftime("%Y-%m-%d %H:%M:%S")
+    })
+    
+    # Keep only last 100 records
+    history["publishes"] = history["publishes"][-100:]
+    save_publish_history(history, log_path)
+
+
+# ============= End Cookie & Rate Limit Functions =============
+
 
 def log_step(message):
     print(f"PUBLISH_STEP: {message}", file=sys.stderr)
@@ -781,6 +909,15 @@ async def publish(payload):
 
     base_dir = Path(payload.get("workDir") or Path(__file__).resolve().parent.parent / "data" / "publish")
     base_dir.mkdir(parents=True, exist_ok=True)
+
+    # Rate limiting check (learned from xiaohongshu-mcp)
+    can_publish, reason = check_rate_limit(base_dir)
+    if not can_publish:
+        raise RuntimeError(f"发布频率限制: {reason}")
+
+    # Cookie file path for persistence
+    cookie_file_path = get_cookie_file_path(base_dir)
+
     download_dir = Path(tempfile.mkdtemp(prefix="xhs_publish_", dir=base_dir))
 
     media_requests = []
@@ -994,6 +1131,12 @@ async def publish(payload):
                 f"html={html_path}; screenshot={png_path}"
             )
         log_step(f"publish success in {time.perf_counter() - publish_start:.1f}s")
+
+        # Save cookies for persistence (learned from xiaohongshu-mcp)
+        await save_context_cookies(context, cookie_file_path)
+
+        # Record this publish for rate limiting
+        record_publish(base_dir, title)
 
         await context.close()
         await browser.close()
