@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useRef, useState } from 'react';
 import Link from 'next/link';
@@ -24,10 +24,10 @@ interface RewriteResult {
 }
 
 const styleOptions = [
-  { value: 'similar', label: '相似风格', emoji: '🔄' },
-  { value: 'creative', label: '创意改写', emoji: '✨' },
-  { value: 'professional', label: '专业版', emoji: '📊' },
-  { value: 'casual', label: '口语化', emoji: '💬' }
+  { value: 'similar', label: '鐩镐技椋庢牸', emoji: '馃攧' },
+  { value: 'creative', label: '鍒涙剰鏀瑰啓', emoji: '鉁? },
+  { value: 'professional', label: '涓撲笟鐗?, emoji: '馃搳' },
+  { value: 'casual', label: '鍙ｈ鍖?, emoji: '馃挰' }
 ];
 
 export default function RewritePage() {
@@ -41,35 +41,35 @@ export default function RewritePage() {
   const [error, setError] = useState('');
   const rewriteInFlightRef = useRef(false);
   const rewriteAbortRef = useRef<AbortController | null>(null);
+  const appVersion =
+    process.env.NEXT_PUBLIC_APP_VERSION ||
+    process.env.NEXT_PUBLIC_BUILD_TIME ||
+    'dev';
 
-  // 从分享文本中智能提取信息
+  // 浠庡垎浜枃鏈腑鏅鸿兘鎻愬彇淇℃伅
   const extractFromShareText = (text: string) => {
-    // 提取【】中的标题
-    const bracketMatch = text.match(/【([^】]+)】/);
+    // 鎻愬彇銆愩€戜腑鐨勬爣棰?    const bracketMatch = text.match(/銆?[^銆慮+)銆?);
     let title = '';
     if (bracketMatch) {
-      // 格式通常是: 标题 - 作者 | 小红书
-      const parts = bracketMatch[1].split(/\s*[-|]\s*/);
+      // 鏍煎紡閫氬父鏄? 鏍囬 - 浣滆€?| 灏忕孩涔?      const parts = bracketMatch[1].split(/\s*[-|]\s*/);
       title = parts[0]?.trim() || '';
     }
 
-    // 提取作者（在 - 和 | 之间）
-    const authorMatch = text.match(/【[^】]*\s*-\s*([^|]+)\s*\|/);
+    // 鎻愬彇浣滆€咃紙鍦?- 鍜?| 涔嬮棿锛?    const authorMatch = text.match(/銆怺^銆慮*\s*-\s*([^|]+)\s*\|/);
     const author = authorMatch?.[1]?.trim() || '';
 
     return { title, author };
   };
 
-  // 解析链接
+  // 瑙ｆ瀽閾炬帴
   const parseLink = async () => {
     if (!linkInput.trim()) {
-      setError('请粘贴小红书笔记链接');
+      setError('璇风矘璐村皬绾功绗旇閾炬帴');
       return;
     }
 
-    // 验证是否包含小红书链接
-    if (!linkInput.includes('xiaohongshu.com') && !linkInput.includes('xhslink.com')) {
-      setError('请粘贴有效的小红书链接');
+    // 楠岃瘉鏄惁鍖呭惈灏忕孩涔﹂摼鎺?    if (!linkInput.includes('xiaohongshu.com') && !linkInput.includes('xhslink.com')) {
+      setError('璇风矘璐存湁鏁堢殑灏忕孩涔﹂摼鎺?);
       return;
     }
 
@@ -79,8 +79,7 @@ export default function RewritePage() {
     setResult(null);
 
     try {
-      // 先从分享文本中提取信息
-      const extracted = extractFromShareText(linkInput);
+      // 鍏堜粠鍒嗕韩鏂囨湰涓彁鍙栦俊鎭?      const extracted = extractFromShareText(linkInput);
 
       const response = await fetch('/api/parse-xiaohongshu', {
         method: 'POST',
@@ -91,8 +90,7 @@ export default function RewritePage() {
       const data = await response.json();
 
       if (data.success && data.data) {
-        // 优先使用从分享文本提取的标题，其次用API返回的
-        const title = extracted.title || data.data.title || '小红书笔记';
+        // 浼樺厛浣跨敤浠庡垎浜枃鏈彁鍙栫殑鏍囬锛屽叾娆＄敤API杩斿洖鐨?        const title = extracted.title || data.data.title || '灏忕孩涔︾瑪璁?;
         const author = extracted.author || data.data.author || '';
         const content = data.data.content || '';
         const images = data.data.images || [];
@@ -100,8 +98,8 @@ export default function RewritePage() {
         const noteType = data.data.noteType || (videoUrl ? 'video' : 'note');
         const sourceUrl = data.data.sourceUrl || '';
 
-        // 检查是否获取到有效内容
-        if (content && content.length > 30 && !content.includes('未检测到') && !content.includes('解析遇到')) {
+        // 妫€鏌ユ槸鍚﹁幏鍙栧埌鏈夋晥鍐呭
+        if (content && content.length > 30 && !content.includes('鏈娴嬪埌') && !content.includes('瑙ｆ瀽閬囧埌')) {
           setParsedNote({
             title,
             content,
@@ -112,25 +110,24 @@ export default function RewritePage() {
             sourceUrl
           });
         } else {
-          // 如果内容解析失败但有标题，尝试用AI生成内容参考
-          if (title) {
-            setError(`链接解析受限，但已提取标题："${title}"。\n\n由于小红书的反爬保护，无法自动获取正文内容。\n请先在小红书APP中复制正文后再次尝试。`);
+          // 濡傛灉鍐呭瑙ｆ瀽澶辫触浣嗘湁鏍囬锛屽皾璇曠敤AI鐢熸垚鍐呭鍙傝€?          if (title) {
+            setError(`閾炬帴瑙ｆ瀽鍙楅檺锛屼絾宸叉彁鍙栨爣棰橈細"${title}"銆俓n\n鐢变簬灏忕孩涔︾殑鍙嶇埇淇濇姢锛屾棤娉曡嚜鍔ㄨ幏鍙栨鏂囧唴瀹广€俓n璇峰厛鍦ㄥ皬绾功APP涓鍒舵鏂囧悗鍐嶆灏濊瘯銆俙);
           } else {
-            setError('小红书限制了外部访问，无法解析此笔记。请尝试其他笔记链接。');
+            setError('灏忕孩涔﹂檺鍒朵簡澶栭儴璁块棶锛屾棤娉曡В鏋愭绗旇銆傝灏濊瘯鍏朵粬绗旇閾炬帴銆?);
           }
         }
       } else {
-        setError(data.error || '解析失败，请检查链接是否正确');
+        setError(data.error || '瑙ｆ瀽澶辫触锛岃妫€鏌ラ摼鎺ユ槸鍚︽纭?);
       }
     } catch (err) {
-      console.error('解析失败:', err);
-      setError('网络错误，请重试');
+      console.error('瑙ｆ瀽澶辫触:', err);
+      setError('缃戠粶閿欒锛岃閲嶈瘯');
     } finally {
       setIsParsing(false);
     }
   };
 
-  // AI改写
+  // AI鏀瑰啓
   const rewriteContent = async () => {
     if (!parsedNote || rewriteInFlightRef.current) return;
     rewriteInFlightRef.current = true;
@@ -156,7 +153,7 @@ export default function RewritePage() {
       });
 
       if (!response.ok || !response.body) {
-        throw new Error('改写失败');
+        throw new Error('鏀瑰啓澶辫触');
       }
 
       const reader = response.body.getReader();
@@ -177,7 +174,7 @@ export default function RewritePage() {
           try {
             const payload = JSON.parse(line);
             if (payload.type === 'error') {
-              setError(payload.data || '改写失败，请重试');
+              setError(payload.data || '鏀瑰啓澶辫触锛岃閲嶈瘯');
               streamFailed = true;
               break;
             }
@@ -204,7 +201,7 @@ export default function RewritePage() {
         try {
           const payload = JSON.parse(buffer);
           if (payload.type === 'error') {
-            setError(payload.data || '改写失败，请重试');
+            setError(payload.data || '鏀瑰啓澶辫触锛岃閲嶈瘯');
             return;
           }
           if (payload.type === 'result') {
@@ -221,8 +218,8 @@ export default function RewritePage() {
       if (err instanceof DOMException && err.name === 'AbortError') {
         return;
       }
-      console.error('改写失败:', err);
-      setError('改写失败，请重试');
+      console.error('鏀瑰啓澶辫触:', err);
+      setError('鏀瑰啓澶辫触锛岃閲嶈瘯');
     } finally {
       rewriteInFlightRef.current = false;
       setIsRewriting(false);
@@ -232,8 +229,8 @@ export default function RewritePage() {
   const copyToClipboard = async (text: string) => {
     try {
       await navigator.clipboard.writeText(text);
-      alert('已复制');
-    } catch { alert('复制失败'); }
+      alert('宸插鍒?);
+    } catch { alert('澶嶅埗澶辫触'); }
   };
 
   const getFullContent = () => {
@@ -283,10 +280,11 @@ export default function RewritePage() {
       {/* Header */}
       <header className="bg-white/80 backdrop-blur-md shadow-sm sticky top-0 z-50">
         <div className="max-w-lg mx-auto px-4 py-4 flex items-center">
-          <Link href="/" className="text-gray-600 mr-4 text-lg hover:text-gray-900">←</Link>
+          <Link href="/" className="text-gray-600 mr-4 text-lg hover:text-gray-900">鈫?/Link>
           <h1 className="text-lg font-bold text-gray-900 flex items-center gap-2">
-            <span className="text-xl">🔗</span> 对标图文
+            <span className="text-xl">馃敆</span> 瀵规爣鍥炬枃
           </h1>
+          <span className="ml-auto text-[10px] text-gray-400">v{appVersion}</span>
         </div>
       </header>
 
@@ -296,18 +294,17 @@ export default function RewritePage() {
           <div className="bg-white rounded-2xl p-5 shadow-sm">
             <h2 className="font-bold text-gray-900 mb-3 flex items-center gap-2">
               <span className="w-6 h-6 rounded-full bg-green-500 text-white text-xs flex items-center justify-center">1</span>
-              粘贴小红书链接
-            </h2>
+              绮樿创灏忕孩涔﹂摼鎺?            </h2>
 
             <p className="text-xs text-gray-500 mb-3">
-              在小红书APP中点击"分享"→"复制链接"，然后粘贴到下方
+              鍦ㄥ皬绾功APP涓偣鍑?鍒嗕韩"鈫?澶嶅埗閾炬帴"锛岀劧鍚庣矘璐村埌涓嬫柟
             </p>
 
             <textarea
               value={linkInput}
               onChange={(e) => setLinkInput(e.target.value)}
-              placeholder={`粘贴分享内容，例如：
-14【怎么没人说这个 - 橘哈哈 | 小红书】😆 https://www.xiaohongshu.com/...`}
+              placeholder={`绮樿创鍒嗕韩鍐呭锛屼緥濡傦細
+14銆愭€庝箞娌′汉璇磋繖涓?- 姗樺搱鍝?| 灏忕孩涔︺€戰煒?https://www.xiaohongshu.com/...`}
               rows={4}
               className="w-full px-4 py-3 bg-gray-50 rounded-xl border border-gray-200 focus:ring-2 focus:ring-green-400 focus:border-transparent outline-none text-gray-900 placeholder-gray-400 resize-none text-sm"
             />
@@ -326,9 +323,9 @@ export default function RewritePage() {
               {isParsing ? (
                 <span className="flex items-center justify-center gap-2">
                   <span className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
-                  解析中...
+                  瑙ｆ瀽涓?..
                 </span>
-              ) : '🔍 解析笔记'}
+              ) : '馃攳 瑙ｆ瀽绗旇'}
             </button>
           </div>
         )}
@@ -340,11 +337,10 @@ export default function RewritePage() {
             <div className="bg-white rounded-2xl p-5 shadow-sm">
               <div className="flex items-center justify-between mb-3">
                 <h2 className="font-bold text-gray-900 flex items-center gap-2">
-                  <span className="w-6 h-6 rounded-full bg-green-500 text-white text-xs flex items-center justify-center">✓</span>
-                  原笔记内容
-                </h2>
+                  <span className="w-6 h-6 rounded-full bg-green-500 text-white text-xs flex items-center justify-center">鉁?/span>
+                  鍘熺瑪璁板唴瀹?                </h2>
                 <button onClick={reset} className="text-xs text-gray-500 hover:text-gray-700">
-                  重新解析
+                  閲嶆柊瑙ｆ瀽
                 </button>
               </div>
 
@@ -355,7 +351,7 @@ export default function RewritePage() {
                     <div key={i} className="w-20 h-20 flex-shrink-0 rounded-lg overflow-hidden bg-gray-100">
                       <Image
                         src={getProxyImageUrl(img)}
-                        alt={`图片${i + 1}`}
+                        alt={`鍥剧墖${i + 1}`}
                         width={80}
                         height={80}
                         className="w-full h-full object-cover"
@@ -368,18 +364,18 @@ export default function RewritePage() {
 
               <div className="space-y-2">
                 <div>
-                  <label className="text-xs text-gray-500">标题</label>
+                  <label className="text-xs text-gray-500">鏍囬</label>
                   <div className="p-2 bg-gray-50 rounded-lg text-sm text-gray-800 mt-1 font-medium">
                     {parsedNote.title}
                   </div>
                 </div>
                 {parsedNote.author && (
                   <div className="text-xs text-gray-500">
-                    作者：{parsedNote.author}
+                    浣滆€咃細{parsedNote.author}
                   </div>
                 )}
                 <div>
-                  <label className="text-xs text-gray-500">内容预览</label>
+                  <label className="text-xs text-gray-500">鍐呭棰勮</label>
                   <div className="p-2 bg-gray-50 rounded-lg text-xs text-gray-600 mt-1 max-h-24 overflow-y-auto">
                     {parsedNote.content.slice(0, 200)}...
                   </div>
@@ -391,7 +387,7 @@ export default function RewritePage() {
             <div className="bg-white rounded-2xl p-5 shadow-sm">
               <h2 className="font-bold text-gray-900 mb-3 flex items-center gap-2">
                 <span className="w-6 h-6 rounded-full bg-green-500 text-white text-xs flex items-center justify-center">2</span>
-                选择改写风格
+                閫夋嫨鏀瑰啓椋庢牸
               </h2>
 
               <div className="grid grid-cols-4 gap-2">
@@ -415,7 +411,7 @@ export default function RewritePage() {
                 disabled={isRewriting}
                 className="w-full mt-4 bg-gradient-to-r from-green-500 to-emerald-500 text-white py-4 rounded-xl font-bold shadow-lg transition-all active:scale-[0.98] disabled:opacity-50"
               >
-                {isRewriting ? '✨ AI改写中...' : '🚀 开始改写'}
+                {isRewriting ? '鉁?AI鏀瑰啓涓?..' : '馃殌 寮€濮嬫敼鍐?}
               </button>
             </div>
           </div>
@@ -425,8 +421,8 @@ export default function RewritePage() {
         {isRewriting && (
           <div className="bg-white rounded-2xl p-8 shadow-sm text-center">
             <div className="w-14 h-14 border-4 border-gray-100 border-t-green-500 rounded-full animate-spin mx-auto mb-4"></div>
-            <p className="text-gray-800 font-medium">AI正在改写中...</p>
-            <p className="text-gray-500 text-xs mt-1">预计10-15秒完成</p>
+            <p className="text-gray-800 font-medium">AI姝ｅ湪鏀瑰啓涓?..</p>
+            <p className="text-gray-500 text-xs mt-1">棰勮10-15绉掑畬鎴?/p>
           </div>
         )}
 
@@ -435,16 +431,16 @@ export default function RewritePage() {
           <div className="bg-white rounded-2xl p-5 shadow-sm">
             <div className="flex items-center justify-between mb-4">
               <h2 className="font-bold text-gray-900 flex items-center gap-2">
-                <span className="text-xl">🎉</span> 改写完成
+                <span className="text-xl">馃帀</span> 鏀瑰啓瀹屾垚
               </h2>
               <button onClick={reset} className="text-sm text-green-600 hover:text-green-700 font-medium">
-                改写其他笔记
+                鏀瑰啓鍏朵粬绗旇
               </button>
             </div>
 
             {/* New Titles */}
             <div className="mb-4">
-              <label className="text-sm font-medium text-gray-700 mb-2 block">选择新标题</label>
+              <label className="text-sm font-medium text-gray-700 mb-2 block">閫夋嫨鏂版爣棰?/label>
               <div className="space-y-2">
                 {result.newTitles.map((title, i) => (
                   <div
@@ -457,7 +453,7 @@ export default function RewritePage() {
                   >
                     <div className="flex items-center justify-between">
                       <span className="text-sm text-gray-900">{title}</span>
-                      {selectedTitle === title && <span className="text-green-500">✓</span>}
+                      {selectedTitle === title && <span className="text-green-500">鉁?/span>}
                     </div>
                   </div>
                 ))}
@@ -467,8 +463,8 @@ export default function RewritePage() {
             {/* New Content */}
             <div className="mb-4">
               <div className="flex items-center justify-between mb-2">
-                <label className="text-sm font-medium text-gray-700">改写内容</label>
-                <span className="text-xs text-gray-400">{result.newContent.length} 字</span>
+                <label className="text-sm font-medium text-gray-700">鏀瑰啓鍐呭</label>
+                <span className="text-xs text-gray-400">{result.newContent.length} 瀛?/span>
               </div>
               <div className="p-4 bg-gray-50 rounded-xl max-h-60 overflow-y-auto">
                 <pre className="text-sm text-gray-800 whitespace-pre-wrap font-sans leading-relaxed">
@@ -480,7 +476,7 @@ export default function RewritePage() {
             {/* Tags */}
             {result.keyPoints.length > 0 && (
               <div className="mb-4">
-                <label className="text-sm font-medium text-gray-700 mb-2 block">推荐标签</label>
+                <label className="text-sm font-medium text-gray-700 mb-2 block">鎺ㄨ崘鏍囩</label>
                 <div className="flex flex-wrap gap-2">
                   {result.keyPoints.map((tag, i) => (
                     <span key={i} className="px-3 py-1 bg-green-50 text-green-600 text-sm rounded-full">
@@ -497,7 +493,7 @@ export default function RewritePage() {
                 onClick={() => copyToClipboard(getFullContent())}
                 className="flex-1 bg-gray-100 text-gray-700 py-3 rounded-xl font-medium hover:bg-gray-200 transition-colors"
               >
-                📋 复制全部
+                馃搵 澶嶅埗鍏ㄩ儴
               </button>
               <PublishButton content={getFullContent()} publishData={getPublishPayload() || undefined} className="flex-1" />
             </div>
@@ -507,3 +503,5 @@ export default function RewritePage() {
     </div>
   );
 }
+
+
