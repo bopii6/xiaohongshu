@@ -5,14 +5,15 @@ import type { NextRequest } from 'next/server';
 const publicPaths = [
     '/',           // 首页
     '/login',      // 登录页
-    '/api/auth',   // 认证 API
+    '/admin',      // 管理员后台（有独立的密码验证）
 ];
 
-// 静态资源路径前缀
+// 静态资源和 API 路径前缀
 const staticPrefixes = [
     '/_next',
     '/favicon.ico',
     '/api/auth',
+    '/api/admin',  // 管理员 API（有独立的验证）
 ];
 
 export function middleware(request: NextRequest) {

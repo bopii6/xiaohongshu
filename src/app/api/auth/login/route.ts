@@ -1,15 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
+import { validateUser } from '@/lib/users';
 
-// 从环境变量获取认证信息
-const AUTH_USERNAME = process.env.AUTH_USERNAME || 'admin';
-const AUTH_PASSWORD = process.env.AUTH_PASSWORD || 'xhs2026';
-
-// 简单的 token 生成（实际生产环境建议使用 JWT）
+// 简单的 token 生成
 function generateToken(username: string): string {
     const timestamp = Date.now();
-    const data = `${username}:${timestamp}:${AUTH_PASSWORD}`;
-    // 简单的 base64 编码
+    const data = `${username}:${timestamp}:auth`;
     return Buffer.from(data).toString('base64');
 }
 
@@ -18,8 +14,10 @@ export async function POST(request: NextRequest) {
         const body = await request.json();
         const { username, password } = body;
 
-        // 验证账号密码
-        if (username === AUTH_USERNAME && password === AUTH_PASSWORD) {
+        // 验证用户
+        const user = validateUser(username, password);
+
+        if (user) {
             // 生成认证 token
             const token = generateToken(username);
 
@@ -35,7 +33,8 @@ export async function POST(request: NextRequest) {
 
             return NextResponse.json({
                 success: true,
-                message: '登录成功'
+                message: '登录成功',
+                user: { name: user.name }
             });
         } else {
             return NextResponse.json(

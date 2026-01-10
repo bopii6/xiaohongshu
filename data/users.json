@@ -1,0 +1,12 @@
+{
+    "users": [
+        {
+            "id": "1",
+            "username": "demo",
+            "password": "demo123",
+            "name": "演示用户",
+            "createdAt": "2026-01-10T00:00:00Z",
+            "enabled": true
+        }
+    ]
+}
