@@ -86,6 +86,10 @@ const features: FeatureCard[] = [
   }
 ];
 
+// Force dynamic rendering to bust Cloudflare cache
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 export default function Home() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-[#FFF5F5] via-white to-[#FFF0F5] font-sans">
