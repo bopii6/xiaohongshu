@@ -207,10 +207,10 @@ export default function ProductCreatePage() {
                                     <div className="flex flex-col items-center">
                                         <div
                                             className={`w-10 h-10 rounded-full flex items-center justify-center text-lg transition-all duration-300 ${isCompleted
-                                                    ? 'bg-green-500 text-white shadow-lg shadow-green-500/30'
-                                                    : isActive
-                                                        ? 'bg-gradient-to-r from-blue-500 to-indigo-500 text-white shadow-lg shadow-blue-500/30 animate-pulse'
-                                                        : 'bg-gray-100 text-gray-400'
+                                                ? 'bg-green-500 text-white shadow-lg shadow-green-500/30'
+                                                : isActive
+                                                    ? 'bg-gradient-to-r from-blue-500 to-indigo-500 text-white shadow-lg shadow-blue-500/30 animate-pulse'
+                                                    : 'bg-gray-100 text-gray-400'
                                                 }`}
                                         >
                                             {isCompleted ? '✓' : step.icon}
@@ -318,10 +318,43 @@ export default function ProductCreatePage() {
                             className="w-full bg-gradient-to-r from-blue-500 to-indigo-500 text-white py-4 rounded-xl font-bold text-lg shadow-lg shadow-blue-500/25 hover:shadow-blue-500/40 transition-all active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                         >
                             {isGenerating ? (
-                                <>
-                                    <span className="animate-spin">⏳</span>
-                                    生成中...
-                                </>
+                                <div className="space-y-3">
+                                    <div className="flex items-center justify-center gap-2">
+                                        <div className="w-6 h-6 rounded-full bg-gradient-to-r from-blue-500 to-indigo-500 flex items-center justify-center animate-pulse">
+                                            <span className="text-sm">✨</span>
+                                        </div>
+                                        <span className="font-bold text-blue-600">AI 正在创作...</span>
+                                    </div>
+
+                                    {/* Inline sub-phase indicators */}
+                                    <div className="flex items-center justify-center gap-1 flex-wrap">
+                                        {AI_PHASES.map((phase, index) => (
+                                            <span key={index} className="flex items-center">
+                                                <span
+                                                    className={`text-xs px-2 py-0.5 rounded-full transition-all ${index === aiPhase
+                                                            ? 'bg-blue-500 text-white font-medium'
+                                                            : index < aiPhase
+                                                                ? 'bg-green-100 text-green-600'
+                                                                : 'bg-gray-100 text-gray-400'
+                                                        }`}
+                                                >
+                                                    {phase}
+                                                </span>
+                                                {index < AI_PHASES.length - 1 && (
+                                                    <span className="text-gray-300 mx-0.5 text-xs">→</span>
+                                                )}
+                                            </span>
+                                        ))}
+                                    </div>
+
+                                    {/* Progress bar */}
+                                    <div className="w-full h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                                        <div
+                                            className="h-full bg-gradient-to-r from-blue-500 to-indigo-500 transition-all duration-500"
+                                            style={{ width: `${((aiPhase + 1) / AI_PHASES.length) * 100}%` }}
+                                        />
+                                    </div>
+                                </div>
                             ) : (
                                 <>
                                     <span>🚀</span>
@@ -329,46 +362,6 @@ export default function ProductCreatePage() {
                                 </>
                             )}
                         </button>
-                    </div>
-                )}
-
-                {/* AI Generation Progress */}
-                {isGenerating && (
-                    <div className="bg-white rounded-2xl p-6 shadow-sm">
-                        <div className="text-center">
-                            <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-gradient-to-r from-blue-500 to-indigo-500 flex items-center justify-center animate-pulse">
-                                <span className="text-3xl">✨</span>
-                            </div>
-                            <h3 className="font-bold text-gray-800 mb-2">AI 正在创作...</h3>
-
-                            {/* Sub-phase indicators */}
-                            <div className="flex items-center justify-center gap-1 mb-4 flex-wrap">
-                                {AI_PHASES.map((phase, index) => (
-                                    <span key={index} className="flex items-center">
-                                        <span
-                                            className={`text-xs px-2 py-1 rounded-full transition-all ${index === aiPhase
-                                                    ? 'bg-blue-500 text-white font-medium'
-                                                    : index < aiPhase
-                                                        ? 'bg-green-100 text-green-600'
-                                                        : 'bg-gray-100 text-gray-400'
-                                                }`}
-                                        >
-                                            {phase}
-                                        </span>
-                                        {index < AI_PHASES.length - 1 && (
-                                            <span className="text-gray-300 mx-1">→</span>
-                                        )}
-                                    </span>
-                                ))}
-                            </div>
-
-                            <div className="w-full h-2 bg-gray-100 rounded-full overflow-hidden">
-                                <div
-                                    className="h-full bg-gradient-to-r from-blue-500 to-indigo-500 transition-all duration-500"
-                                    style={{ width: `${((aiPhase + 1) / AI_PHASES.length) * 100}%` }}
-                                />
-                            </div>
-                        </div>
                     </div>
                 )}
 
@@ -397,8 +390,8 @@ export default function ProductCreatePage() {
                                         key={i}
                                         onClick={() => setSelectedTitle(title)}
                                         className={`p-3 rounded-xl border cursor-pointer transition-all ${selectedTitle === title
-                                                ? 'border-blue-400 bg-blue-50'
-                                                : 'border-gray-200 hover:border-gray-300'
+                                            ? 'border-blue-400 bg-blue-50'
+                                            : 'border-gray-200 hover:border-gray-300'
                                             }`}
                                     >
                                         <div className="flex items-center justify-between">
