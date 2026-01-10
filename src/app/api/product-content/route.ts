@@ -68,7 +68,8 @@ export async function POST(request: NextRequest) {
             : '请观察这张产品图片，识别产品并创作小红书种草笔记。';
 
         // Prefer the vision-capable model; fall back to text in the catch block.
-        const resolvedModel = 'glm-4v';
+        // Using glm-4.5v-flash for vision (user has 6M token package)
+        const resolvedModel = 'glm-4.5v-flash';
 
         // For GLM-4V, we need to send image in a specific format
         const messages = [
