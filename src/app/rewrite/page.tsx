@@ -1,9 +1,8 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { useRef, useState, useEffect } from 'react';
 import Link from 'next/link';
-import Image from 'next/image';
-import PublishButton from '@/components/PublishButton';
+
 
 type RewriteStyle = 'similar' | 'creative' | 'professional' | 'casual';
 
@@ -11,9 +10,6 @@ interface ParsedNote {
   title: string;
   content: string;
   author: string;
-  images: string[];
-  videoUrl?: string;
-  noteType?: string;
   sourceUrl?: string;
 }
 
@@ -23,69 +19,151 @@ interface RewriteResult {
   keyPoints: string[];
 }
 
+// 进度状态
+type ProgressStep =
+  | 'idle'
+  | 'parsing'
+  | 'analyzing-structure' // New state for visual delay
+  | 'parsed'
+  | 'selecting-style'
+  | 'rewriting-init'
+  | 'rewriting-analyzing'
+  | 'rewriting-generating'
+  | 'rewriting-polishing'
+  | 'completed';
+
 const styleOptions = [
-  { value: 'similar', label: '相似风格', emoji: '🔄' },
-  { value: 'creative', label: '创意改写', emoji: '✨' },
-  { value: 'professional', label: '专业版', emoji: '📊' },
-  { value: 'casual', label: '口语化', emoji: '💬' }
+  { value: 'similar', label: '相似风格', emoji: '🔄', desc: '保持原有风格特点' },
+  { value: 'creative', label: '创意改写', emoji: '✨', desc: '更加吸引眼球' },
+  { value: 'professional', label: '专业版', emoji: '📊', desc: '干货分享风格' },
+  { value: 'casual', label: '轻松口语', emoji: '💬', desc: '像朋友聊天一样' }
 ];
+
+// 进度步骤配置
+const progressSteps = [
+  { key: 'input', label: '输入链接', icon: '🔗' },
+  { key: 'parse', label: '解析内容', icon: '📋' },
+  { key: 'style', label: '选择风格', icon: '🎨' },
+  { key: 'rewrite', label: 'AI 改写', icon: '✨' },
+  { key: 'done', label: '完成', icon: '🎉' }
+];
+
+function getStepIndex(status: ProgressStep): number {
+  switch (status) {
+    case 'idle': return 0;
+    case 'parsing':
+    case 'analyzing-structure': return 1;
+    case 'parsed':
+    case 'selecting-style': return 2;
+    case 'rewriting-init':
+    case 'rewriting-analyzing':
+    case 'rewriting-generating':
+    case 'rewriting-polishing': return 3;
+    case 'completed': return 4;
+    default: return 0;
+  }
+}
+
+function getRewritePhaseText(status: ProgressStep): string {
+  switch (status) {
+    case 'rewriting-init': return '正在初始化 AI...';
+    case 'rewriting-analyzing': return '正在分析原文结构...';
+    case 'rewriting-generating': return '正在生成新内容...';
+    case 'rewriting-polishing': return '正在润色优化...';
+    default: return 'AI 改写中...';
+  }
+}
+
+function getParsePhaseText(status: ProgressStep): string {
+  switch (status) {
+    case 'parsing': return '正在连接小红书...';
+    case 'analyzing-structure': return '正在分析笔记结构...';
+    default: return '解析中...';
+  }
+}
 
 export default function RewritePage() {
   const [linkInput, setLinkInput] = useState('');
   const [rewriteStyle, setRewriteStyle] = useState<RewriteStyle>('similar');
-  const [isParsing, setIsParsing] = useState(false);
-  const [isRewriting, setIsRewriting] = useState(false);
   const [parsedNote, setParsedNote] = useState<ParsedNote | null>(null);
   const [result, setResult] = useState<RewriteResult | null>(null);
   const [selectedTitle, setSelectedTitle] = useState('');
   const [error, setError] = useState('');
+  const [progressStatus, setProgressStatus] = useState<ProgressStep>('idle');
+  const [editedContent, setEditedContent] = useState('');
+  const [isEditingContent, setIsEditingContent] = useState(false);
+  const [copyFeedback, setCopyFeedback] = useState('');
+
   const rewriteInFlightRef = useRef(false);
   const rewriteAbortRef = useRef<AbortController | null>(null);
-  const appVersion =
-    process.env.NEXT_PUBLIC_APP_VERSION ||
-    process.env.NEXT_PUBLIC_BUILD_TIME ||
-    'dev';
+  const resultRef = useRef<HTMLDivElement>(null);
 
-  // 从分享文本中智能提取信息
+  const appVersion = process.env.NEXT_PUBLIC_APP_VERSION || process.env.NEXT_PUBLIC_BUILD_TIME || 'dev';
+
+  // Auto-scroll to result carefully
+  useEffect(() => {
+    if (result && resultRef.current) {
+      // Smooth scroll but maybe not all the way to top if unwanted
+      resultRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }, [result]);
+
+  // Initialize edited content
+  useEffect(() => {
+    if (result?.newContent) {
+      setEditedContent(result.newContent);
+    }
+  }, [result?.newContent]);
+
+  // Simulate progress phases during rewriting
+  useEffect(() => {
+    if (progressStatus === 'rewriting-init') {
+      const timer = setTimeout(() => setProgressStatus('rewriting-analyzing'), 1500);
+      return () => clearTimeout(timer);
+    }
+    if (progressStatus === 'rewriting-analyzing') {
+      const timer = setTimeout(() => setProgressStatus('rewriting-generating'), 2500);
+      return () => clearTimeout(timer);
+    }
+    if (progressStatus === 'rewriting-generating') {
+      const timer = setTimeout(() => setProgressStatus('rewriting-polishing'), 4000);
+      return () => clearTimeout(timer);
+    }
+  }, [progressStatus]);
+
   const extractFromShareText = (text: string) => {
-    // 提取【】中的标题
     const bracketMatch = text.match(/【([^】]+)】/);
     let title = '';
     if (bracketMatch) {
-      // 格式通常是: 标题 - 作者 | 小红书
       const parts = bracketMatch[1].split(/\s*[-|]\s*/);
       title = parts[0]?.trim() || '';
     }
-
-    // 提取作者（在 - 和 | 之间）
     const authorMatch = text.match(/【[^】]*\s*-\s*([^|]+)\s*\|/);
     const author = authorMatch?.[1]?.trim() || '';
-
     return { title, author };
   };
 
-  // 解析链接
   const parseLink = async () => {
     if (!linkInput.trim()) {
       setError('请粘贴小红书笔记链接');
       return;
     }
 
-    // 验证是否包含小红书链接
     if (!linkInput.includes('xiaohongshu.com') && !linkInput.includes('xhslink.com')) {
       setError('请粘贴有效的小红书链接');
       return;
     }
 
-    setIsParsing(true);
+    setProgressStatus('parsing');
     setError('');
     setParsedNote(null);
     setResult(null);
 
     try {
-      // 先从分享文本中提取信息
-      const extracted = extractFromShareText(linkInput);
+      // 1. Artificial delay for "Connecting"
+      await new Promise(r => setTimeout(r, 800));
 
+      const extracted = extractFromShareText(linkInput);
       const response = await fetch('/api/parse-xiaohongshu', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -95,51 +173,40 @@ export default function RewritePage() {
       const data = await response.json();
 
       if (data.success && data.data) {
-        // 优先使用从分享文本提取的标题，其次用API返回的
+        // 2. Show analysis state
+        setProgressStatus('analyzing-structure');
+        await new Promise(r => setTimeout(r, 1500));
+
         const title = extracted.title || data.data.title || '小红书笔记';
         const author = extracted.author || data.data.author || '';
         const content = data.data.content || '';
-        const images = data.data.images || [];
-        const videoUrl = data.data.videoUrl || '';
-        const noteType = data.data.noteType || (videoUrl ? 'video' : 'note');
         const sourceUrl = data.data.sourceUrl || '';
 
-        // 检查是否获取到有效内容
         if (content && content.length > 30 && !content.includes('未检测到') && !content.includes('解析遇到')) {
-          setParsedNote({
-            title,
-            content,
-            author,
-            images,
-            videoUrl,
-            noteType,
-            sourceUrl
-          });
+          setParsedNote({ title, content, author, sourceUrl });
+          setProgressStatus('parsed');
+          // Short delay before showing style selection
+          setTimeout(() => setProgressStatus('selecting-style'), 300);
         } else {
-          // 如果内容解析失败但有标题，尝试用AI生成内容参考
-          if (title) {
-            setError(`链接解析受限，但已提取标题："${title}"。\n\n由于小红书的反爬保护，无法自动获取正文内容。\n请先在小红书APP中复制正文后再次尝试。`);
-          } else {
-            setError('小红书限制了外部访问，无法解析此笔记。请尝试其他笔记链接。');
-          }
+          setError('小红书限制了外部访问，无法解析此笔记。请尝试其他链接。');
+          setProgressStatus('idle');
         }
       } else {
         setError(data.error || '解析失败，请检查链接是否正确');
+        setProgressStatus('idle');
       }
     } catch (err) {
       console.error('解析失败:', err);
       setError('网络错误，请重试');
-    } finally {
-      setIsParsing(false);
+      setProgressStatus('idle');
     }
   };
 
-  // AI改写
   const rewriteContent = async () => {
     if (!parsedNote || rewriteInFlightRef.current) return;
     rewriteInFlightRef.current = true;
 
-    setIsRewriting(true);
+    setProgressStatus('rewriting-init');
     setError('');
     setResult(null);
 
@@ -192,14 +259,14 @@ export default function RewritePage() {
                 keyPoints: payload.data.keyPoints || []
               });
               setSelectedTitle(payload.data.newTitles?.[0] || '');
+              setProgressStatus('completed');
             }
           } catch { /* ignore */ }
         }
 
         if (streamFailed) {
-          try {
-            await reader.cancel();
-          } catch { /* ignore */ }
+          setProgressStatus('selecting-style');
+          try { await reader.cancel(); } catch { /* ignore */ }
           break;
         }
       }
@@ -209,6 +276,7 @@ export default function RewritePage() {
           const payload = JSON.parse(buffer);
           if (payload.type === 'error') {
             setError(payload.data || '改写失败，请重试');
+            setProgressStatus('selecting-style');
             return;
           }
           if (payload.type === 'result') {
@@ -218,293 +286,371 @@ export default function RewritePage() {
               keyPoints: payload.data.keyPoints || []
             });
             setSelectedTitle(payload.data.newTitles?.[0] || '');
+            setProgressStatus('completed');
           }
         } catch { /* ignore */ }
       }
     } catch (err) {
-      if (err instanceof DOMException && err.name === 'AbortError') {
-        return;
-      }
+      if (err instanceof DOMException && err.name === 'AbortError') return;
       console.error('改写失败:', err);
       setError('改写失败，请重试');
+      setProgressStatus('selecting-style');
     } finally {
       rewriteInFlightRef.current = false;
-      setIsRewriting(false);
     }
   };
 
-  const copyToClipboard = async (text: string) => {
+  const copyToClipboard = async (text: string, message = '已复制到剪贴板') => {
     try {
       await navigator.clipboard.writeText(text);
-      alert('已复制');
+      setCopyFeedback(message);
+      setTimeout(() => setCopyFeedback(''), 2000);
     } catch { alert('复制失败'); }
   };
 
   const getFullContent = () => {
     if (!result) return '';
     const title = selectedTitle || result.newTitles[0] || '';
+    const content = isEditingContent ? editedContent : result.newContent;
     const tags = result.keyPoints.map(t => `#${t}`).join(' ');
-    return `${title}\n\n${result.newContent}\n\n${tags}`;
+    return `${title}\n\n${content}\n\n${tags}`;
   };
 
-  const getPublishPayload = () => {
-    if (!parsedNote) return null;
-    const title = selectedTitle || result?.newTitles?.[0] || parsedNote.title;
-    const content = result?.newContent || parsedNote.content;
-    const tags = result?.keyPoints || [];
-    return {
-      title,
-      content,
-      tags,
-      images: parsedNote.images,
-      videoUrl: parsedNote.videoUrl,
-      noteType: parsedNote.noteType,
-      sourceUrl: parsedNote.sourceUrl
-    };
-  };
 
-  const getProxyImageUrl = (url: string) => {
-    const params = new URLSearchParams({ url });
-    if (parsedNote?.sourceUrl) {
-      params.set('referer', parsedNote.sourceUrl);
-    }
-    return `/api/xhs/image?${params.toString()}`;
-  };
 
   const reset = () => {
     rewriteAbortRef.current?.abort();
     rewriteAbortRef.current = null;
     rewriteInFlightRef.current = false;
-    setIsRewriting(false);
     setLinkInput('');
     setParsedNote(null);
     setResult(null);
     setError('');
+    setEditedContent('');
+    setIsEditingContent(false);
+    setProgressStatus('idle');
   };
 
+  const currentStepIndex = getStepIndex(progressStatus);
+  const isRewriting = progressStatus.startsWith('rewriting');
+  const isParsing = progressStatus === 'parsing' || progressStatus === 'analyzing-structure';
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-green-50 to-emerald-50 pb-8">
+    <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-green-50 to-teal-50">
       {/* Header */}
-      <header className="bg-white/80 backdrop-blur-md shadow-sm sticky top-0 z-50">
-        <div className="max-w-lg mx-auto px-4 py-4 flex items-center">
-          <Link href="/" className="text-gray-600 mr-4 text-lg hover:text-gray-900">←</Link>
-          <h1 className="text-lg font-bold text-gray-900 flex items-center gap-2">
-            <span className="text-xl">🔗</span> 对标图文
-          </h1>
-          <span className="ml-auto text-[10px] text-gray-400">v{appVersion}</span>
+      <header className="bg-white/90 backdrop-blur-lg border-b border-gray-100 sticky top-0 z-50">
+        <div className="max-w-2xl mx-auto px-4 py-3 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <Link href="/" className="w-8 h-8 flex items-center justify-center rounded-full bg-gray-100 hover:bg-gray-200 transition-colors">
+              <span className="text-gray-600">←</span>
+            </Link>
+            <h1 className="text-lg font-bold bg-gradient-to-r from-emerald-600 to-teal-600 bg-clip-text text-transparent">
+              对标图文
+            </h1>
+          </div>
+          <div className="flex items-center gap-2">
+            {parsedNote && (
+              <button onClick={reset} className="text-sm text-gray-500 hover:text-gray-700 px-3 py-1.5 rounded-full hover:bg-gray-100 transition-colors">
+                重新开始
+              </button>
+            )}
+            <span className="text-[10px] text-gray-400">v{appVersion}</span>
+          </div>
         </div>
       </header>
 
-      <main className="max-w-lg mx-auto px-4 py-6 space-y-4">
-        {/* Step 1: Link Input */}
-        {!parsedNote && !result && (
-          <div className="bg-white rounded-2xl p-5 shadow-sm">
-            <h2 className="font-bold text-gray-900 mb-3 flex items-center gap-2">
-              <span className="w-6 h-6 rounded-full bg-green-500 text-white text-xs flex items-center justify-center">1</span>
-              粘贴小红书链接
-            </h2>
-
-            <p className="text-xs text-gray-500 mb-3">
-              在小红书APP中点击"分享"→"复制链接"，然后粘贴到下方
-            </p>
-
-            <textarea
-              value={linkInput}
-              onChange={(e) => setLinkInput(e.target.value)}
-              placeholder={`粘贴分享内容，例如：
-14【怎么没人说这个 - 橘哈哈 | 小红书】😆 https://www.xiaohongshu.com/...`}
-              rows={4}
-              className="w-full px-4 py-3 bg-gray-50 rounded-xl border border-gray-200 focus:ring-2 focus:ring-green-400 focus:border-transparent outline-none text-gray-900 placeholder-gray-400 resize-none text-sm"
-            />
-
-            {error && (
-              <div className="mt-3 p-3 bg-red-50 text-red-600 rounded-xl text-sm whitespace-pre-wrap">
-                {error}
+      <main className="max-w-2xl mx-auto px-4 py-6">
+        {/* Visual Progress Bar */}
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 mb-6 sticky top-16 z-40 bg-white/95 backdrop-blur">
+          <div className="flex items-center justify-between">
+            {progressSteps.map((step, i) => (
+              <div key={step.key} className="flex items-center flex-1">
+                <div className="flex flex-col items-center flex-1">
+                  {/* Step Circle */}
+                  <div className={`w-8 h-8 md:w-10 md:h-10 rounded-full flex items-center justify-center text-sm md:text-lg transition-all duration-300 ${i < currentStepIndex
+                    ? 'bg-emerald-500 text-white shadow-lg shadow-emerald-200'
+                    : i === currentStepIndex
+                      ? 'bg-emerald-500 text-white shadow-lg shadow-emerald-200 ring-4 ring-emerald-100 scale-110'
+                      : 'bg-gray-100 text-gray-400'
+                    }`}>
+                    {i < currentStepIndex ? '✓' : step.icon}
+                  </div>
+                  {/* Step Label */}
+                  <span className={`text-[10px] md:text-xs mt-2 font-medium transition-colors ${i <= currentStepIndex ? 'text-emerald-600' : 'text-gray-400'
+                    }`}>
+                    {step.label}
+                  </span>
+                </div>
+                {/* Connector Line */}
+                {i < progressSteps.length - 1 && (
+                  <div className="flex-1 h-1 mx-1 rounded-full overflow-hidden bg-gray-100">
+                    <div
+                      className={`h-full bg-emerald-500 transition-all duration-500 ${i < currentStepIndex ? 'w-full' : 'w-0'
+                        }`}
+                    />
+                  </div>
+                )}
               </div>
-            )}
+            ))}
+          </div>
 
-            <button
-              onClick={parseLink}
-              disabled={isParsing || !linkInput.trim()}
-              className="w-full mt-4 bg-gradient-to-r from-green-500 to-emerald-500 text-white py-4 rounded-xl font-bold shadow-lg shadow-green-500/25 transition-all active:scale-[0.98] disabled:opacity-50"
-            >
-              {isParsing ? (
-                <span className="flex items-center justify-center gap-2">
-                  <span className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
-                  解析中...
+          {/* Current Step Description & Status */}
+          {(isRewriting || isParsing) && (
+            <div className="mt-4 pt-4 border-t border-gray-100">
+              <div className="flex items-center justify-center gap-3">
+                <div className="w-4 h-4 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin" />
+                <span className="text-emerald-600 font-medium text-sm">
+                  {isParsing ? getParsePhaseText(progressStatus) : getRewritePhaseText(progressStatus)}
                 </span>
-              ) : '🔍 解析笔记'}
+              </div>
+
+              {isRewriting && (
+                <div className="flex justify-center gap-2 mt-3">
+                  {['初始化', '分析', '生成', '润色'].map((phase, i) => {
+                    const phaseStatus = progressStatus.replace('rewriting-', '');
+                    const phaseIndex = ['init', 'analyzing', 'generating', 'polishing'].indexOf(phaseStatus);
+                    return (
+                      <div
+                        key={phase}
+                        className={`px-2 py-0.5 rounded-full text-[10px] transition-all ${i < phaseIndex
+                          ? 'bg-emerald-100 text-emerald-600'
+                          : i === phaseIndex
+                            ? 'bg-emerald-500 text-white animate-pulse'
+                            : 'bg-gray-100 text-gray-400'
+                          }`}
+                      >
+                        {phase}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Step 1: Link Input (Compact Mode when Parsed) */}
+        {!parsedNote && (
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden mb-4 animate-slide-up">
+            <div className="p-4 border-b border-gray-50 bg-gradient-to-r from-emerald-50 to-teal-50">
+              <h2 className="font-semibold text-gray-800 flex items-center gap-2">
+                <span className="w-6 h-6 rounded-full bg-emerald-500 text-white text-xs flex items-center justify-center">1</span>
+                粘贴小红书链接
+              </h2>
+            </div>
+            <div className="p-4">
+              <textarea
+                value={linkInput}
+                onChange={(e) => setLinkInput(e.target.value)}
+                placeholder="从小红书 APP 分享笔记，复制链接后粘贴到这里..."
+                rows={3}
+                disabled={isParsing}
+                className="w-full px-4 py-3 bg-gray-50 rounded-xl border border-gray-200 focus:ring-2 focus:ring-emerald-400 focus:border-transparent outline-none text-gray-900 placeholder-gray-400 resize-none text-sm disabled:opacity-50"
+              />
+              <button
+                onClick={parseLink}
+                disabled={isParsing || !linkInput.trim()}
+                className="w-full mt-3 bg-gradient-to-r from-emerald-500 to-teal-500 text-white py-3 rounded-xl font-semibold shadow-lg shadow-emerald-200/50 transition-all hover:shadow-xl active:scale-[0.98] disabled:opacity-50 disabled:shadow-none"
+              >
+                {isParsing ? '解析中...' : '🔍 解析笔记'}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Compact Link Display when Parsed */}
+        {parsedNote && (
+          <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-3 mb-4 flex items-center justify-between animate-slide-up">
+            <div className="flex items-center gap-2 text-sm text-gray-600 overflow-hidden">
+              <span className="text-emerald-500 text-lg">🔗</span>
+              <span className="truncate max-w-[200px] md:max-w-sm">{linkInput}</span>
+            </div>
+            <button onClick={reset} className="text-xs text-emerald-600 font-medium hover:text-emerald-700 whitespace-nowrap px-2 py-1 bg-emerald-50 rounded-lg">
+              更换链接
             </button>
           </div>
         )}
 
-        {/* Step 2: Parsed Content & Style Selection */}
+        {error && (
+          <div className="p-4 bg-red-50 border border-red-100 text-red-600 rounded-xl text-sm whitespace-pre-wrap mb-4 animate-slide-up">
+            {error}
+          </div>
+        )}
+
+        {/* Combined Parsed Content & Style Selection (Compact Layout) */}
         {parsedNote && !result && (
-          <div className="space-y-4">
-            {/* Parsed Note Preview */}
-            <div className="bg-white rounded-2xl p-5 shadow-sm">
-              <div className="flex items-center justify-between mb-3">
-                <h2 className="font-bold text-gray-900 flex items-center gap-2">
-                  <span className="w-6 h-6 rounded-full bg-green-500 text-white text-xs flex items-center justify-center">✓</span>
-                  原笔记内容
+          <div className="animate-slide-up space-y-4">
+            {/* Content Preview (More Compact) */}
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+              <div className="p-3 border-b border-gray-50 bg-gray-50 flex items-center justify-between">
+                <h2 className="font-semibold text-gray-700 text-sm flex items-center gap-2">
+                  <span className="w-5 h-5 rounded-full bg-emerald-500 text-white text-[10px] flex items-center justify-center">✓</span>
+                  原笔记
                 </h2>
-                <button onClick={reset} className="text-xs text-gray-500 hover:text-gray-700">
-                  重新解析
+                <span className="text-xs text-gray-400">{parsedNote.content.length} 字</span>
+              </div>
+              <div className="p-3">
+                <div className="font-medium text-gray-900 text-sm mb-1 line-clamp-1">{parsedNote.title}</div>
+                <div className="text-xs text-gray-500 line-clamp-3 leading-relaxed">
+                  {parsedNote.content}
+                </div>
+              </div>
+            </div>
+
+            {/* Style Selection (Compact Grid) */}
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+              <div className="p-3 border-b border-gray-50 flex items-center gap-2">
+                <span className="w-5 h-5 rounded-full bg-emerald-500 text-white text-[10px] flex items-center justify-center">2</span>
+                <h2 className="font-semibold text-gray-700 text-sm">选择改写风格</h2>
+              </div>
+              <div className="p-3">
+                <div className="grid grid-cols-2 gap-2 mb-3">
+                  {styleOptions.map((opt) => (
+                    <button
+                      key={opt.value}
+                      onClick={() => setRewriteStyle(opt.value as RewriteStyle)}
+                      disabled={isRewriting}
+                      className={`p-2.5 rounded-xl border text-left transition-all ${rewriteStyle === opt.value
+                        ? 'border-emerald-400 bg-emerald-50 ring-1 ring-emerald-200'
+                        : 'border-gray-100 hover:border-gray-200 hover:bg-gray-50'
+                        } disabled:opacity-50`}
+                    >
+                      <div className="flex items-center gap-2 mb-0.5">
+                        <span className="text-lg">{opt.emoji}</span>
+                        <span className="font-medium text-gray-900 text-sm">{opt.label}</span>
+                      </div>
+                      <div className="text-[10px] text-gray-500 pl-[26px]">{opt.desc}</div>
+                    </button>
+                  ))}
+                </div>
+
+                <button
+                  onClick={rewriteContent}
+                  disabled={isRewriting}
+                  className="w-full bg-gradient-to-r from-emerald-500 to-teal-500 text-white py-3 rounded-xl font-bold shadow-lg shadow-emerald-200/50 transition-all hover:shadow-xl active:scale-[0.98] disabled:opacity-50"
+                >
+                  {isRewriting ? 'AI 改写中...' : '🚀 开始改写'}
                 </button>
               </div>
+            </div>
+          </div>
+        )}
 
-              {/* Images Preview */}
-              {parsedNote.images && parsedNote.images.length > 0 && (
-                <div className="flex gap-2 mb-3 overflow-x-auto pb-2">
-                  {parsedNote.images.slice(0, 4).map((img, i) => (
-                    <div key={i} className="w-20 h-20 flex-shrink-0 rounded-lg overflow-hidden bg-gray-100">
-                      <Image
-                        src={getProxyImageUrl(img)}
-                        alt={`图片${i + 1}`}
-                        width={80}
-                        height={80}
-                        className="w-full h-full object-cover"
-                        unoptimized
-                      />
-                    </div>
+        {/* Step 4: Result */}
+        {result && (
+          <div ref={resultRef} className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden animate-slide-up">
+            <div className="p-4 border-b border-gray-50 bg-gradient-to-r from-emerald-100 to-teal-100">
+              <div className="flex items-center justify-between">
+                <h2 className="font-semibold text-gray-800 flex items-center gap-2">
+                  <span className="text-xl">🎉</span>
+                  改写完成
+                </h2>
+                <button
+                  onClick={() => { setResult(null); setProgressStatus('selecting-style'); setIsEditingContent(false); }}
+                  className="text-sm text-emerald-600 hover:text-emerald-700 font-medium"
+                >
+                  重新选择风格
+                </button>
+              </div>
+            </div>
+
+            <div className="p-4 space-y-4">
+              {/* New Titles */}
+              <div>
+                <label className="text-sm font-medium text-gray-700 mb-2 block">选择标题</label>
+                <div className="space-y-2">
+                  {result.newTitles.map((title, i) => (
+                    <button
+                      key={i}
+                      onClick={() => setSelectedTitle(title)}
+                      className={`w-full p-3 rounded-xl border-2 text-left transition-all ${selectedTitle === title
+                        ? 'border-emerald-400 bg-emerald-50'
+                        : 'border-gray-100 hover:border-gray-200'
+                        }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm text-gray-900">{title}</span>
+                        {selectedTitle === title && <span className="text-emerald-500 text-lg">✓</span>}
+                      </div>
+                    </button>
                   ))}
+                </div>
+              </div>
+
+              {/* New Content */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="text-sm font-medium text-gray-700">改写内容</label>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-gray-400">{(isEditingContent ? editedContent : result.newContent).length} 字</span>
+                    <button
+                      onClick={() => setIsEditingContent(!isEditingContent)}
+                      className="text-xs text-emerald-600 hover:text-emerald-700"
+                    >
+                      {isEditingContent ? '完成编辑' : '编辑内容'}
+                    </button>
+                  </div>
+                </div>
+                {isEditingContent ? (
+                  <textarea
+                    value={editedContent}
+                    onChange={(e) => setEditedContent(e.target.value)}
+                    className="w-full p-4 bg-gray-50 rounded-xl border border-gray-200 text-sm text-gray-800 leading-relaxed min-h-[200px] focus:ring-2 focus:ring-emerald-400 focus:border-transparent outline-none resize-y"
+                  />
+                ) : (
+                  <div className="p-4 bg-gray-50 rounded-xl max-h-60 overflow-y-auto">
+                    <pre className="text-sm text-gray-800 whitespace-pre-wrap font-sans leading-relaxed">
+                      {result.newContent}
+                    </pre>
+                  </div>
+                )}
+              </div>
+
+              {/* Tags */}
+              {result.keyPoints.length > 0 && (
+                <div>
+                  <label className="text-sm font-medium text-gray-700 mb-2 block">推荐标签</label>
+                  <div className="flex flex-wrap gap-2">
+                    {result.keyPoints.map((tag, i) => (
+                      <button
+                        key={i}
+                        onClick={() => copyToClipboard(`#${tag}`, `标签 #${tag} 已复制`)}
+                        className="px-3 py-1.5 bg-emerald-50 text-emerald-600 text-sm rounded-full border border-emerald-100 hover:bg-emerald-100 transition-colors"
+                      >
+                        #{tag}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               )}
 
-              <div className="space-y-2">
-                <div>
-                  <label className="text-xs text-gray-500">标题</label>
-                  <div className="p-2 bg-gray-50 rounded-lg text-sm text-gray-800 mt-1 font-medium">
-                    {parsedNote.title}
-                  </div>
+              {/* Copy Success Toast */}
+              {copyFeedback && (
+                <div className="fixed bottom-24 left-1/2 -translate-x-1/2 bg-gray-900/90 text-white px-6 py-3 rounded-full shadow-xl flex items-center gap-3 animate-slide-up z-50 backdrop-blur-md border border-white/10">
+                  <span className="text-xl">🎉</span>
+                  <span className="font-medium">{copyFeedback}</span>
                 </div>
-                {parsedNote.author && (
-                  <div className="text-xs text-gray-500">
-                    作者：{parsedNote.author}
-                  </div>
-                )}
-                <div>
-                  <label className="text-xs text-gray-500">内容预览</label>
-                  <div className="p-2 bg-gray-50 rounded-lg text-xs text-gray-600 mt-1 max-h-24 overflow-y-auto">
-                    {parsedNote.content.slice(0, 200)}...
-                  </div>
-                </div>
-              </div>
+              )}
             </div>
-
-            {/* Style Selection */}
-            <div className="bg-white rounded-2xl p-5 shadow-sm">
-              <h2 className="font-bold text-gray-900 mb-3 flex items-center gap-2">
-                <span className="w-6 h-6 rounded-full bg-green-500 text-white text-xs flex items-center justify-center">2</span>
-                选择改写风格
-              </h2>
-
-              <div className="grid grid-cols-4 gap-2">
-                {styleOptions.map((opt) => (
-                  <button
-                    key={opt.value}
-                    onClick={() => setRewriteStyle(opt.value as RewriteStyle)}
-                    className={`p-3 rounded-xl border text-center transition-all ${rewriteStyle === opt.value
-                        ? 'border-green-400 bg-green-50'
-                        : 'border-gray-200 hover:border-gray-300'
-                      }`}
-                  >
-                    <div className="text-xl">{opt.emoji}</div>
-                    <div className="text-xs text-gray-700 mt-1">{opt.label}</div>
-                  </button>
-                ))}
-              </div>
-
-              <button
-                onClick={rewriteContent}
-                disabled={isRewriting}
-                className="w-full mt-4 bg-gradient-to-r from-green-500 to-emerald-500 text-white py-4 rounded-xl font-bold shadow-lg transition-all active:scale-[0.98] disabled:opacity-50"
-              >
-                {isRewriting ? '✨ AI改写中...' : '🚀 开始改写'}
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Loading */}
-        {isRewriting && (
-          <div className="bg-white rounded-2xl p-8 shadow-sm text-center">
-            <div className="w-14 h-14 border-4 border-gray-100 border-t-green-500 rounded-full animate-spin mx-auto mb-4"></div>
-            <p className="text-gray-800 font-medium">AI正在改写中...</p>
-            <p className="text-gray-500 text-xs mt-1">预计10-15秒完成</p>
-          </div>
-        )}
-
-        {/* Result */}
-        {result && (
-          <div className="bg-white rounded-2xl p-5 shadow-sm">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="font-bold text-gray-900 flex items-center gap-2">
-                <span className="text-xl">🎉</span> 改写完成
-              </h2>
-              <button onClick={reset} className="text-sm text-green-600 hover:text-green-700 font-medium">
-                改写其他笔记
-              </button>
-            </div>
-
-            {/* New Titles */}
-            <div className="mb-4">
-              <label className="text-sm font-medium text-gray-700 mb-2 block">选择新标题</label>
-              <div className="space-y-2">
-                {result.newTitles.map((title, i) => (
-                  <div
-                    key={i}
-                    onClick={() => setSelectedTitle(title)}
-                    className={`p-3 rounded-xl border cursor-pointer transition-all ${selectedTitle === title
-                        ? 'border-green-400 bg-green-50'
-                        : 'border-gray-200 hover:border-gray-300'
-                      }`}
-                  >
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm text-gray-900">{title}</span>
-                      {selectedTitle === title && <span className="text-green-500">✓</span>}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* New Content */}
-            <div className="mb-4">
-              <div className="flex items-center justify-between mb-2">
-                <label className="text-sm font-medium text-gray-700">改写内容</label>
-                <span className="text-xs text-gray-400">{result.newContent.length} 字</span>
-              </div>
-              <div className="p-4 bg-gray-50 rounded-xl max-h-60 overflow-y-auto">
-                <pre className="text-sm text-gray-800 whitespace-pre-wrap font-sans leading-relaxed">
-                  {result.newContent}
-                </pre>
-              </div>
-            </div>
-
-            {/* Tags */}
-            {result.keyPoints.length > 0 && (
-              <div className="mb-4">
-                <label className="text-sm font-medium text-gray-700 mb-2 block">推荐标签</label>
-                <div className="flex flex-wrap gap-2">
-                  {result.keyPoints.map((tag, i) => (
-                    <span key={i} className="px-3 py-1 bg-green-50 text-green-600 text-sm rounded-full">
-                      #{tag}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            )}
 
             {/* Actions */}
-            <div className="flex gap-3 pt-2">
-              <button
-                onClick={() => copyToClipboard(getFullContent())}
-                className="flex-1 bg-gray-100 text-gray-700 py-3 rounded-xl font-medium hover:bg-gray-200 transition-colors"
-              >
-                📋 复制全部
-              </button>
-              <PublishButton content={getFullContent()} publishData={getPublishPayload() || undefined} className="flex-1" />
+            <div className="p-4 bg-gray-50 border-t border-gray-100">
+              <div className="flex flex-col gap-3">
+                <button
+                  onClick={() => {
+                    copyToClipboard(getFullContent(), '全部内容已复制！去发帖吧 🚀');
+                    // Optional: fire confetti if we had a library, but simple toast is good for now
+                  }}
+                  className="w-full bg-gradient-to-r from-emerald-500 to-teal-500 text-white py-4 rounded-xl font-bold shadow-lg shadow-emerald-200/50 transition-all hover:scale-[1.02] hover:shadow-xl active:scale-[0.98] flex items-center justify-center gap-2 group"
+                >
+                  <span className="text-xl group-hover:animate-bounce">📋</span>
+                  <span className="text-lg">一键复制全部内容</span>
+                </button>
+
+                <div className="flex items-center justify-center gap-2 text-xs text-gray-400">
+                  <span>💡 提示：复制后直接打开小红书粘贴即可</span>
+                </div>
+              </div>
             </div>
           </div>
         )}

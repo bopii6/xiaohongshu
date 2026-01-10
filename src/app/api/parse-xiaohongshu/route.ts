@@ -67,6 +67,27 @@ function normalizeImageUrl(url: string): string {
   return trimmed;
 }
 
+/**
+ * Extract unique image identifier from XHS image URL.
+ * This handles different URL formats for the same image (different sizes, CDNs, etc.)
+ */
+function extractImageIdentifier(url: string): string {
+  // Pattern 1: 24-char hex ID (most common XHS format)
+  const hexMatch = url.match(/\/([a-f0-9]{24})(?:[!?/]|$)/i);
+  if (hexMatch?.[1]) return hexMatch[1];
+
+  // Pattern 2: spectrum path with ID
+  const spectrumMatch = url.match(/\/spectrum\/([^/?!]+)/i);
+  if (spectrumMatch?.[1]) return spectrumMatch[1];
+
+  // Pattern 3: Generic filename extraction (without extension and params)
+  const filenameMatch = url.match(/\/([^/?!]+?)(?:\.[a-z]{3,4})?(?:[!?]|$)/i);
+  if (filenameMatch?.[1] && filenameMatch[1].length >= 8) return filenameMatch[1];
+
+  // Fallback: use full URL
+  return url;
+}
+
 function extractImageUrls(html: string): string[] {
   const candidates = new Set<string>();
   const push = (url: string) => {
@@ -259,7 +280,18 @@ function extractNoteFromData(noteData: Record<string, unknown>): StructuredNoteD
   const noteType = videoUrl || (rawType && rawType.toLowerCase() !== 'normal') ? 'video' : 'note';
 
   if (!title && !content && images.length === 0 && !videoUrl) return null;
-  const uniqueImages = Array.from(new Set(images)).filter(url => url.length > 0);
+
+  // Deduplicate images by their core identifier, not full URL
+  // This handles cases where XHS returns same image with different URL params/CDNs
+  const seen = new Map<string, string>();
+  for (const url of images) {
+    if (!url) continue;
+    const id = extractImageIdentifier(url);
+    if (!seen.has(id)) {
+      seen.set(id, url);
+    }
+  }
+  const uniqueImages = Array.from(seen.values());
 
   return {
     title: title ?? undefined,
