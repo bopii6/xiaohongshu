@@ -221,7 +221,7 @@ export default function TemplatesPage() {
           <div className="flex items-center justify-between">
             <h1 className="text-2xl font-bold text-pink-600">📋 内容模板库</h1>
             <div className="flex items-center gap-4">
-              <Link href="/rewrite" className="text-gray-700 hover:text-pink-600 text-sm">
+              <Link href="/ai-rewrite" className="text-gray-700 hover:text-pink-600 text-sm">
                 对标改写
               </Link>
               <Link href="/" className="text-gray-700 hover:text-pink-600">
@@ -250,11 +250,10 @@ export default function TemplatesPage() {
                 <button
                   key={category}
                   onClick={() => setSelectedCategory(category)}
-                  className={`px-4 py-2 rounded-full transition-colors ${
-                    selectedCategory === category
+                  className={`px-4 py-2 rounded-full transition-colors ${selectedCategory === category
                       ? 'bg-pink-500 text-white'
                       : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                  }`}
+                    }`}
                 >
                   {category}
                 </button>

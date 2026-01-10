@@ -1,5 +1,5 @@
 /* eslint-disable @next/next/no-img-element */
-﻿'use client';
+'use client';
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
@@ -126,7 +126,7 @@ export default function HistoryPage() {
           <div className="flex items-center justify-between">
             <h1 className="text-2xl font-bold text-pink-600">📝 历史记录</h1>
             <div className="flex items-center gap-4">
-              <Link href="/rewrite" className="text-gray-700 hover:text-pink-600 text-sm">
+              <Link href="/ai-rewrite" className="text-gray-700 hover:text-pink-600 text-sm">
                 对标改写
               </Link>
               {historyItems.length > 0 && (
@@ -147,25 +147,22 @@ export default function HistoryPage() {
           <div className="flex flex-wrap gap-2">
             <button
               onClick={() => setFilterType('all')}
-              className={`px-4 py-2 rounded-full transition-colors ${
-                filterType === 'all' ? 'bg-pink-500 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-              }`}
+              className={`px-4 py-2 rounded-full transition-colors ${filterType === 'all' ? 'bg-pink-500 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                }`}
             >
               全部 ({historyItems.length})
             </button>
             <button
               onClick={() => setFilterType('business')}
-              className={`px-4 py-2 rounded-full transition-colors ${
-                filterType === 'business' ? 'bg-pink-500 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-              }`}
+              className={`px-4 py-2 rounded-full transition-colors ${filterType === 'business' ? 'bg-pink-500 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                }`}
             >
               🛍️ 卖货商家 ({historyItems.filter((item) => item.type === 'business').length})
             </button>
             <button
               onClick={() => setFilterType('ip')}
-              className={`px-4 py-2 rounded-full transition-colors ${
-                filterType === 'ip' ? 'bg-purple-500 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-              }`}
+              className={`px-4 py-2 rounded-full transition-colors ${filterType === 'ip' ? 'bg-purple-500 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                }`}
             >
               ✨ 个人 IP ({historyItems.filter((item) => item.type === 'ip').length})
             </button>

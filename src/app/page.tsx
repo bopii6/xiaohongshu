@@ -13,7 +13,7 @@ interface FeatureCard {
 
 const features: FeatureCard[] = [
   {
-    href: '/rewrite',
+    href: '/ai-rewrite',
     icon: '🔗',
     title: '对标图文',
     description: '一键生成全新标题文案',
