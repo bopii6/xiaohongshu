@@ -4,8 +4,7 @@ import { getTencentAiArtClient, IMAGE_STYLE_PRESETS, ImageStyleId } from '@/lib/
 import { uploadBufferToCos } from '@/lib/tencent/cos-client';
 import { createMaskFromBase64 } from '@/lib/tencent/mask-utils';
 
-const DASHSCOPE_GENERATION_URL = 'https://dashscope.aliyuncs.com/api/v1/services/aigc/background-generation/generation/';
-const DASHSCOPE_TASK_URL = 'https://dashscope.aliyuncs.com/api/v1/tasks/';
+const DASHSCOPE_EDIT_URL = 'https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation';
 
 interface ProductImagesRequest {
     imageBase64: string;
@@ -33,23 +32,92 @@ function readPositiveNumber(value: string | undefined, fallback: number) {
     return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
-function readNumber(value: string | undefined, fallback: number) {
-    const parsed = Number(value);
-    return Number.isFinite(parsed) ? parsed : fallback;
+function readBoolean(value: string | undefined, fallback: boolean) {
+    if (value === undefined) {
+        return fallback;
+    }
+    const normalized = value.trim().toLowerCase();
+    if (normalized === 'true' || normalized === '1') {
+        return true;
+    }
+    if (normalized === 'false' || normalized === '0') {
+        return false;
+    }
+    return fallback;
+}
+
+async function normalizeImageBufferForDashScope(buffer: Buffer): Promise<{ buffer: Buffer; mimeType: string }> {
+    const maxEdge = readPositiveNumber(process.env.DASHSCOPE_MAX_EDGE, 1280);
+
+    const metadata = await sharp(buffer).rotate().metadata();
+    let pipeline = sharp(buffer).rotate();
+
+    if (metadata.width && metadata.height) {
+        const maxDimension = Math.max(metadata.width, metadata.height);
+        if (maxDimension > maxEdge) {
+            const width = metadata.width >= metadata.height ? maxEdge : undefined;
+            const height = metadata.height > metadata.width ? maxEdge : undefined;
+            pipeline = pipeline.resize({ width, height, fit: 'inside', withoutEnlargement: true });
+        }
+    }
+
+    const output = await pipeline.ensureAlpha().png().toBuffer();
+    return { buffer: output, mimeType: 'image/png' };
+}
+
+async function applyMaskToImage(imageBuffer: Buffer, maskBuffer: Buffer): Promise<Buffer> {
+    const base = sharp(imageBuffer).ensureAlpha();
+    const metadata = await base.metadata();
+    const width = metadata.width || 0;
+    const height = metadata.height || 0;
+
+    if (!width || !height) {
+        throw new Error('Invalid image dimensions');
+    }
+
+    let maskRaw = await sharp(maskBuffer).raw().toBuffer();
+    const maskInfo = await sharp(maskBuffer).metadata();
+    if (maskInfo.width !== width || maskInfo.height !== height) {
+        maskRaw = await sharp(maskBuffer)
+            .resize(width, height, { fit: 'fill' })
+            .raw()
+            .toBuffer();
+    }
+
+    return base
+        .removeAlpha()
+        .joinChannel(maskRaw, { raw: { width, height, channels: 1 } })
+        .png()
+        .toBuffer();
 }
 
 function buildDashScopePrompt(styleId: ImageStyleId, productName?: string) {
-    const preset = IMAGE_STYLE_PRESETS[styleId];
-    const base = preset.description || preset.name || 'clean background';
-    if (!productName) {
-        return base;
+    const productHint = productName ? `, focus on the product ${productName}` : '';
+    const keepProduct = 'keep the product unchanged, preserve logo and text, same size and position';
+
+    switch (styleId) {
+        case 'holiday':
+            return `replace the background with a festive holiday scene, red lanterns, golden ornaments, warm glow, confetti, bokeh lights, ${keepProduct}${productHint}`;
+        case 'seasonal':
+            return `replace the background with a seasonal themed scene, soft pastel colors, seasonal flowers and leaves, natural light, ${keepProduct}${productHint}`;
+        case 'scene':
+            return `replace the background with a modern lifestyle scene, clean home interior, soft daylight, shallow depth of field, ${keepProduct}${productHint}`;
+        case 'contrast':
+            return `replace the background with a high-contrast studio setup, dramatic spotlight, gradient backdrop, premium ad style, ${keepProduct}${productHint}`;
+        case 'elegant':
+        default:
+            return `replace the background with a minimal elegant scene, marble texture, soft natural light, premium clean look, ${keepProduct}${productHint}`;
     }
-    return `${base}, highlight ${productName}`;
 }
 
 function extractDashScopeImageUrls(payload: unknown): string[] {
     const data = payload as {
         output?: {
+            choices?: Array<{
+                message?: {
+                    content?: Array<{ image?: string; image_url?: string; imageUrl?: string }>;
+                };
+            }>;
             results?: Array<{ url?: string; image_url?: string; imageUrl?: string }>;
             result?: { url?: string; image_url?: string; imageUrl?: string };
             image_url?: string;
@@ -62,6 +130,15 @@ function extractDashScopeImageUrls(payload: unknown): string[] {
     };
 
     const candidates: Array<string | undefined> = [];
+    if (Array.isArray(data?.output?.choices)) {
+        for (const choice of data.output.choices) {
+            if (Array.isArray(choice?.message?.content)) {
+                for (const item of choice.message.content) {
+                    candidates.push(item?.image, item?.image_url, item?.imageUrl);
+                }
+            }
+        }
+    }
     if (Array.isArray(data?.output?.results)) {
         for (const item of data.output.results) {
             candidates.push(item?.url, item?.image_url, item?.imageUrl);
@@ -85,57 +162,46 @@ function extractDashScopeImageUrls(payload: unknown): string[] {
     return candidates.filter((url): url is string => typeof url === 'string' && url.length > 0);
 }
 
-async function pollDashScopeTask(taskId: string, apiKey: string) {
-    const maxAttempts = Math.round(readPositiveNumber(process.env.DASHSCOPE_TASK_MAX_ATTEMPTS, 20));
-    const delayMs = Math.round(readPositiveNumber(process.env.DASHSCOPE_TASK_DELAY_MS, 1500));
-
-    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-        const response = await fetch(`${DASHSCOPE_TASK_URL}${taskId}`, {
-            headers: {
-                Authorization: `Bearer ${apiKey}`
-            }
-        });
-        const data = await response.json().catch(() => ({}));
-        if (!response.ok) {
-            throw new Error(data?.message || `DashScope task request failed: ${response.status}`);
-        }
-
-        const taskStatus = data?.output?.task_status || data?.task_status;
-        if (taskStatus === 'SUCCEEDED' || taskStatus === 'SUCCESS') {
-            return data;
-        }
-        if (taskStatus === 'FAILED' || taskStatus === 'CANCELLED') {
-            throw new Error(data?.message || 'DashScope task failed');
-        }
-
-        await new Promise(resolve => setTimeout(resolve, delayMs));
-    }
-
-    throw new Error('DashScope task timed out');
-}
-
-async function generateDashScopeBackground(params: {
+async function generateDashScopeImageEdit(params: {
     apiKey: string;
-    baseImageUrl: string;
-    refPrompt: string;
+    imageUrl: string;
+    prompt: string;
+    size?: string;
 }) {
-    const payload = {
-        model: process.env.DASHSCOPE_BG_MODEL || 'wanx-background-generation-v2',
-        input: {
-            base_image_url: params.baseImageUrl,
-            ref_prompt: params.refPrompt
-        },
-        parameters: {
-            n: 1,
-            ref_prompt_weight: readNumber(process.env.DASHSCOPE_REF_PROMPT_WEIGHT, 0.5),
-            model_version: process.env.DASHSCOPE_MODEL_VERSION || 'v3'
-        }
+    const negativePromptValue = process.env.DASHSCOPE_NEGATIVE_PROMPT;
+    const negativePrompt = negativePromptValue && negativePromptValue.trim().length > 0
+        ? negativePromptValue
+        : ' ';
+    const parameters: Record<string, unknown> = {
+        n: 1,
+        negative_prompt: negativePrompt,
+        prompt_extend: readBoolean(process.env.DASHSCOPE_PROMPT_EXTEND, true),
+        watermark: readBoolean(process.env.DASHSCOPE_WATERMARK, false)
     };
 
-    const response = await fetch(DASHSCOPE_GENERATION_URL, {
+    if (params.size) {
+        parameters.size = params.size;
+    }
+
+    const payload = {
+        model: process.env.DASHSCOPE_EDIT_MODEL || 'qwen-image-edit-plus',
+        input: {
+            messages: [
+                {
+                    role: 'user',
+                    content: [
+                        { image: params.imageUrl },
+                        { text: params.prompt }
+                    ]
+                }
+            ]
+        },
+        parameters
+    };
+
+    const response = await fetch(DASHSCOPE_EDIT_URL, {
         method: 'POST',
         headers: {
-            'X-DashScope-Async': 'enable',
             Authorization: `Bearer ${params.apiKey}`,
             'Content-Type': 'application/json'
         },
@@ -145,11 +211,6 @@ async function generateDashScopeBackground(params: {
     const data = await response.json().catch(() => ({}));
     if (!response.ok) {
         throw new Error(data?.message || `DashScope request failed: ${response.status}`);
-    }
-
-    const taskId = data?.output?.task_id || data?.output?.taskId || data?.task_id;
-    if (taskId) {
-        return await pollDashScopeTask(taskId, params.apiKey);
     }
 
     return data;
@@ -201,16 +262,52 @@ export async function POST(request: NextRequest) {
             ? styles
             : Object.keys(IMAGE_STYLE_PRESETS) as ImageStyleId[];
 
+        const dashScopeApiKey = process.env.DASHSCOPE_API_KEY;
+        const dashScopeOnly = (process.env.DASHSCOPE_ONLY || '').toLowerCase() === 'true';
+        const dashScopeUseMask = (process.env.DASHSCOPE_USE_MASK || 'true').toLowerCase() !== 'false';
+        const dashScopeImageSizeEnv = process.env.DASHSCOPE_IMAGE_SIZE?.trim();
         const isHttpUrl = /^https?:\/\//i.test(imageBase64.trim());
         let productUrl: string;
         let maskUrl: string | undefined;
+        let dashScopeSize: { width: number; height: number } | null = null;
 
         if (isHttpUrl) {
             productUrl = imageBase64.trim();
         } else {
             const { buffer } = parseBase64Image(imageBase64);
-            const normalized = await normalizeImageBuffer(buffer);
-            const productUpload = await uploadBufferToCos(normalized.buffer, normalized.mimeType);
+            const normalized = dashScopeApiKey
+                ? await normalizeImageBufferForDashScope(buffer)
+                : await normalizeImageBuffer(buffer);
+            let dashScopeBuffer = normalized.buffer;
+
+            if (dashScopeApiKey && dashScopeUseMask) {
+                try {
+                    const normalizedBase64 = normalized.buffer.toString('base64');
+                    const maskResult = await createMaskFromBase64(normalizedBase64);
+                    dashScopeBuffer = await applyMaskToImage(normalized.buffer, maskResult.buffer);
+                    if (!maskResult.isUsable) {
+                        console.warn('[DashScope] Mask out of range, still applied', {
+                            ratio: Number(maskResult.ratio.toFixed(3)),
+                            edgeRatio: Number(maskResult.edgeRatio.toFixed(3)),
+                            width: maskResult.width,
+                            height: maskResult.height,
+                            threshold: maskResult.threshold
+                        });
+                    }
+                } catch (error) {
+                    console.warn('[DashScope] Mask generation failed, fallback to no mask', error);
+                }
+            }
+
+            if (dashScopeApiKey) {
+                const metadata = await sharp(dashScopeBuffer).metadata();
+                if (metadata.width && metadata.height) {
+                    dashScopeSize = { width: metadata.width, height: metadata.height };
+                }
+            }
+
+            const uploadBuffer = dashScopeApiKey ? dashScopeBuffer : normalized.buffer;
+            const productUpload = await uploadBufferToCos(uploadBuffer, normalized.mimeType);
             productUrl = productUpload.url;
 
             if ((process.env.TENCENT_AIART_MASK_ENABLED || 'true').toLowerCase() !== 'false') {
@@ -235,19 +332,25 @@ export async function POST(request: NextRequest) {
             }
         }
 
-        const dashScopeApiKey = process.env.DASHSCOPE_API_KEY;
+        const dashScopeImageSize = dashScopeImageSizeEnv
+            ? dashScopeImageSizeEnv
+            : dashScopeSize
+                ? `${dashScopeSize.width}*${dashScopeSize.height}`
+                : undefined;
+
         const dashScopeResults: Array<{ styleId: ImageStyleId; styleName: string; imageUrl: string; error?: string }> = [];
         const tencentFallbackStyles: ImageStyleId[] = [];
 
         if (dashScopeApiKey) {
             for (const styleId of selectedStyles) {
                 const preset = IMAGE_STYLE_PRESETS[styleId];
-                const refPrompt = buildDashScopePrompt(styleId, productName);
+                const prompt = buildDashScopePrompt(styleId, productName);
                 try {
-                    const data = await generateDashScopeBackground({
+                    const data = await generateDashScopeImageEdit({
                         apiKey: dashScopeApiKey,
-                        baseImageUrl: productUrl,
-                        refPrompt
+                        imageUrl: productUrl,
+                        prompt,
+                        size: dashScopeImageSize
                     });
                     const urls = extractDashScopeImageUrls(data);
                     if (!urls.length) {
@@ -260,15 +363,30 @@ export async function POST(request: NextRequest) {
                     });
                 } catch (error) {
                     console.error(`[DashScope] ${preset.name} failed`, error);
-                    tencentFallbackStyles.push(styleId);
+                    if (dashScopeOnly) {
+                        dashScopeResults.push({
+                            styleId,
+                            styleName: preset.name,
+                            imageUrl: '',
+                            error: error instanceof Error ? error.message : 'DashScope failed'
+                        });
+                    } else {
+                        tencentFallbackStyles.push(styleId);
+                    }
                 }
             }
         } else {
+            if (dashScopeOnly) {
+                return NextResponse.json(
+                    { success: false, error: 'DASHSCOPE_API_KEY 未配置，且已启用 DASHSCOPE_ONLY' },
+                    { status: 500 }
+                );
+            }
             tencentFallbackStyles.push(...selectedStyles);
         }
 
         let results = dashScopeResults;
-        if (tencentFallbackStyles.length > 0) {
+        if (tencentFallbackStyles.length > 0 && !dashScopeOnly) {
             const client = getTencentAiArtClient();
             const tencentResults = await client.generateProductImages({
                 productUrl,
