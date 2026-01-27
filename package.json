@@ -12,11 +12,13 @@
   },
   "dependencies": {
     "@types/multer": "^2.0.0",
+    "cos-nodejs-sdk-v5": "^2.15.4",
     "multer": "^2.0.2",
     "next": "16.0.3",
     "react": "19.2.0",
     "react-dom": "19.2.0",
-    "react-hot-toast": "^2.6.0"
+    "react-hot-toast": "^2.6.0",
+    "sharp": "^0.34.5"
   },
   "devDependencies": {
     "@opennextjs/cloudflare": "^1.13.1",

@@ -14,9 +14,14 @@ interface ProductResult {
 }
 
 export async function POST(request: NextRequest) {
+    // 先解析body并保存，避免后续无法重复读取
+    let productHint = '';
+    let imageBase64 = '';
+
     try {
         const body: ProductRequest = await request.json();
-        const { imageBase64, productHint } = body;
+        imageBase64 = body.imageBase64;
+        productHint = body.productHint || '';
 
         if (!imageBase64) {
             return NextResponse.json(
@@ -63,8 +68,9 @@ export async function POST(request: NextRequest) {
 标签5
 ===TAGS_END===`;
 
+        // 如果用户提供了产品名称，在提示词中明确告诉AI
         const userPrompt = productHint
-            ? `这是一张${productHint}的图片，请根据图片创作小红书种草笔记。`
+            ? `这是一张【${productHint}】的图片。请注意：产品名称是"${productHint}"，请围绕这个产品创作小红书种草笔记，不要识别成其他产品。`
             : '请观察这张产品图片，识别产品并创作小红书种草笔记。';
 
         // Prefer the vision-capable model; fall back to text in the catch block.
@@ -91,6 +97,7 @@ export async function POST(request: NextRequest) {
         });
 
         const fullText = response.choices[0]?.message?.content || '';
+        console.log('AI Response:', fullText.slice(0, 500)); // 添加日志便于调试
         const result = parseProductResult(fullText, productHint);
 
         return NextResponse.json({ success: true, data: result });
@@ -98,10 +105,11 @@ export async function POST(request: NextRequest) {
     } catch (error) {
         console.error('Product content generation error:', error);
 
-        // If vision model fails, try with a text-only fallback
+        // If vision model fails, use the saved productHint for fallback
         try {
-            const body: ProductRequest = await request.json().catch(() => ({ imageBase64: '', productHint: '' }));
-            const result = await generateFallbackContent(body.productHint || '产品');
+            const fallbackName = productHint || '产品';
+            console.log('Using fallback with productHint:', fallbackName);
+            const result = await generateFallbackContent(fallbackName);
             return NextResponse.json({ success: true, data: result });
         } catch {
             return NextResponse.json(

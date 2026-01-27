@@ -4,6 +4,8 @@ import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { toast, Toaster } from 'react-hot-toast';
+import ProductImageGenerator from './ProductImageGenerator';
+import { playSuccessTone, playStartTone, playPhaseTone, warmupAudio } from '@/lib/ui/sound';
 
 export const dynamic = 'force-dynamic';
 
@@ -44,18 +46,23 @@ export default function ProductCreatePage() {
         switch (currentStep) {
             case 'idle': return 0;
             case 'upload': return 1;
-            case 'analyzing': return 1;
+            case 'analyzing': return 2;
             case 'generating': return 3;
             case 'completed': return 4;
             default: return 0;
         }
     };
 
-    // AI 阶段动画
+    // AI 阶段动画 + 音效
     useEffect(() => {
         if (isGenerating && currentStep === 'generating') {
             const interval = setInterval(() => {
-                setAiPhase(prev => (prev + 1) % AI_PHASES.length);
+                setAiPhase(prev => {
+                    const next = (prev + 1) % AI_PHASES.length;
+                    // 播放阶段切换音效
+                    playPhaseTone(next);
+                    return next;
+                });
             }, 1500);
             return () => clearInterval(interval);
         }
@@ -72,6 +79,7 @@ export default function ProductCreatePage() {
         const file = event.target.files?.[0];
         if (!file) return;
 
+        await warmupAudio();
         const allowedTypes = ['image/jpeg', 'image/png', 'image/jpg', 'image/webp'];
         if (!allowedTypes.includes(file.type)) {
             toast.error('请上传 JPEG、PNG 或 WebP 格式的图片');
@@ -92,6 +100,7 @@ export default function ProductCreatePage() {
             setImagePreview(e.target?.result as string);
             setIsUploading(false);
             toast.success('图片上传成功！');
+            playSuccessTone();
         };
         reader.readAsDataURL(file);
     };
@@ -109,9 +118,12 @@ export default function ProductCreatePage() {
             return;
         }
 
+        await warmupAudio();
+        playStartTone(); // 播放启动音效
         setIsGenerating(true);
         setResult(null);
         setAiPhase(0);
+        playPhaseTone(0); // 播放第一阶段音效
 
         // 阶段1: 分析中
         setCurrentStep('analyzing');
@@ -136,6 +148,7 @@ export default function ProductCreatePage() {
                 setSelectedTitle(data.data.titles[0] || '');
                 setCurrentStep('completed');
                 toast.success('文案生成成功！');
+                playSuccessTone();
             } else {
                 toast.error(data.error || '生成失败');
                 setCurrentStep('upload');
@@ -173,60 +186,83 @@ export default function ProductCreatePage() {
     const stepIndex = getStepIndex();
 
     return (
-        <div className="min-h-screen bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50 pb-8">
+        <div className="min-h-screen bg-gradient-to-br from-red-50 via-pink-50 to-rose-50 pb-8">
             <Toaster position="top-center" />
 
-            {/* Header */}
-            <header className="bg-white/80 backdrop-blur-md shadow-sm sticky top-0 z-50">
-                <div className="max-w-lg mx-auto px-4 py-4 flex items-center justify-between">
-                    <div className="flex items-center">
-                        <Link href="/" className="text-gray-600 mr-4 text-lg hover:text-gray-900 transition-colors">
+            {/* 小红书风格 Header */}
+            <header className="glass-card sticky top-0 z-50 border-b border-red-100/50">
+                <div className="max-w-lg mx-auto px-4 py-3 flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                        <Link
+                            href="/"
+                            className="w-8 h-8 rounded-full bg-white/90 flex items-center justify-center text-[#FF2442] hover:bg-white transition-all shadow-sm"
+                        >
                             ←
                         </Link>
-                        <h1 className="text-lg font-bold text-gray-900 flex items-center gap-2">
-                            <span className="text-xl">📦</span> 我有产品
-                        </h1>
+                        <div className="flex items-center gap-2">
+                            {/* 小红薯 Logo风格图标 */}
+                            <div className="w-8 h-8 rounded-lg bg-[#FF2442] flex items-center justify-center shadow-lg shadow-red-200">
+                                <span className="text-white text-base font-bold">薯</span>
+                            </div>
+                            <div>
+                                <h1 className="text-base font-bold text-gray-900">我有产品</h1>
+                                <p className="text-[10px] text-[#FF2442] -mt-0.5">小红薯创作助手</p>
+                            </div>
+                        </div>
                     </div>
-                    <span className="text-xs text-gray-400">
-                        v{new Date().toISOString().slice(0, 16).replace('T', ' ')}
-                    </span>
+                    <div className="flex items-center gap-2">
+                        <span className="text-[10px] text-white bg-gradient-to-r from-[#FF2442] to-[#FF6B6B] px-2 py-0.5 rounded-full font-medium">
+                            AI 驱动
+                        </span>
+                    </div>
                 </div>
             </header>
 
-            {/* Progress Bar */}
-            <div className="bg-white/90 backdrop-blur-sm border-b border-gray-100 sticky top-[60px] z-40 py-4">
-                <div className="max-w-lg mx-auto px-4">
+
+            {/* 四步进度条 */}
+            <div className="bg-white sticky top-[56px] z-40 shadow-sm border-b border-gray-100">
+                <div className="max-w-lg mx-auto px-4 py-5">
                     <div className="flex items-center justify-between">
                         {PROGRESS_STEPS.map((step, index) => {
                             const isActive = stepIndex === step.id;
                             const isCompleted = stepIndex > step.id;
-                            const isPending = stepIndex < step.id;
 
                             return (
                                 <div key={step.id} className="flex items-center flex-1">
                                     <div className="flex flex-col items-center">
+                                        {/* 圆形图标 */}
                                         <div
-                                            className={`w-10 h-10 rounded-full flex items-center justify-center text-lg transition-all duration-300 ${isCompleted
-                                                ? 'bg-green-500 text-white shadow-lg shadow-green-500/30'
-                                                : isActive
-                                                    ? 'bg-gradient-to-r from-blue-500 to-indigo-500 text-white shadow-lg shadow-blue-500/30 animate-pulse'
-                                                    : 'bg-gray-100 text-gray-400'
-                                                }`}
+                                            className={`
+                                                w-12 h-12 rounded-full flex items-center justify-center text-xl
+                                                transition-all duration-300 font-bold
+                                                ${isCompleted
+                                                    ? 'bg-[#10B981] text-white shadow-lg shadow-green-200'
+                                                    : isActive
+                                                        ? 'bg-[#FF2442] text-white shadow-lg shadow-red-200 ring-4 ring-red-100'
+                                                        : 'bg-gray-100 text-gray-400'
+                                                }
+                                            `}
                                         >
                                             {isCompleted ? '✓' : step.icon}
                                         </div>
+                                        {/* 名称 */}
                                         <span
-                                            className={`text-xs mt-1 font-medium transition-colors ${isActive ? 'text-blue-600' : isCompleted ? 'text-green-600' : 'text-gray-400'
-                                                }`}
+                                            className={`
+                                                text-xs mt-2 font-bold
+                                                ${isCompleted ? 'text-[#10B981]' : isActive ? 'text-[#FF2442]' : 'text-gray-400'}
+                                            `}
                                         >
                                             {step.label}
                                         </span>
                                     </div>
+                                    {/* 连接线 */}
                                     {index < PROGRESS_STEPS.length - 1 && (
-                                        <div
-                                            className={`flex-1 h-0.5 mx-2 transition-colors duration-300 ${stepIndex > step.id ? 'bg-green-400' : 'bg-gray-200'
-                                                }`}
-                                        />
+                                        <div className="flex-1 h-1 mx-2 bg-gray-200 rounded-full overflow-hidden">
+                                            <div
+                                                className="h-full bg-[#10B981] rounded-full transition-all duration-500"
+                                                style={{ width: stepIndex > step.id ? '100%' : '0%' }}
+                                            />
+                                        </div>
                                     )}
                                 </div>
                             );
@@ -235,23 +271,35 @@ export default function ProductCreatePage() {
                 </div>
             </div>
 
-            <main className="max-w-lg mx-auto px-4 py-6 space-y-4">
-                {/* Upload Section - Compact when image uploaded */}
-                <div className="bg-white rounded-2xl shadow-sm overflow-hidden">
+            <main className="max-w-lg mx-auto px-4 py-6 space-y-5">
+                {/* Upload Section */}
+                <div className="premium-card overflow-hidden animate-slide-up">
                     {!imagePreview ? (
                         <div className="p-6">
-                            <div className="flex items-start gap-3 mb-4">
-                                <span className="w-6 h-6 rounded-full bg-blue-500 text-white text-sm flex items-center justify-center font-bold">1</span>
+                            <div className="flex items-start gap-3 mb-5">
+                                <div className="w-7 h-7 rounded-full bg-gradient-to-br from-[#FF2442] to-[#FF6B6B] text-white text-sm flex items-center justify-center font-bold shadow-lg shadow-red-200">
+                                    1
+                                </div>
                                 <div>
-                                    <h2 className="font-bold text-gray-800">上传产品图片</h2>
-                                    <p className="text-sm text-gray-500">AI将自动识别产品并生成种草文案</p>
+                                    <h2 className="font-bold text-gray-900 text-lg">上传产品图片</h2>
+                                    <p className="text-sm text-gray-500 mt-0.5">AI将自动识别产品并生成种草文案</p>
                                 </div>
                             </div>
 
-                            <div className="border-2 border-dashed border-gray-200 rounded-xl p-8 text-center hover:border-blue-400 transition-colors relative">
-                                <div className="text-5xl mb-3">📷</div>
-                                <p className="text-gray-600 mb-2 font-medium">点击或拖拽上传产品图片</p>
-                                <p className="text-xs text-gray-400">支持 JPG、PNG、WebP 格式，最大 10MB</p>
+                            {/* Upload Area */}
+                            <div className="relative group">
+                                <div className="absolute -inset-0.5 bg-gradient-to-r from-[#FF2442] via-[#FF6B6B] to-[#FFB4C2] rounded-2xl opacity-50 group-hover:opacity-80 blur transition-opacity duration-300" />
+                                <div className="relative rounded-2xl border-2 border-dashed border-red-200 bg-gradient-to-br from-white via-red-50/30 to-pink-50/50 p-10 text-center transition-all hover:border-[#FF6B6B] hover:bg-red-50/50">
+                                    <div className="mx-auto mb-5 w-20 h-20 rounded-2xl bg-gradient-to-br from-red-100 to-pink-100 shadow-inner flex items-center justify-center">
+                                        <span className="text-4xl animate-float">📷</span>
+                                    </div>
+                                    <p className="text-gray-800 mb-2 font-semibold text-lg">点击或拖拽上传</p>
+                                    <p className="text-sm text-gray-500">支持 JPG、PNG、WebP，最大 10MB</p>
+                                    <div className="mt-5 inline-flex items-center gap-2 rounded-full bg-white/90 px-4 py-2 text-sm text-[#FF2442] shadow-sm border border-red-100">
+                                        <span className="inline-block h-2 w-2 rounded-full bg-[#FF2442] animate-pulse" />
+                                        小红薯专属 AI
+                                    </div>
+                                </div>
                                 <input
                                     type="file"
                                     accept="image/*"
@@ -262,31 +310,33 @@ export default function ProductCreatePage() {
                             </div>
                         </div>
                     ) : (
-                        <div className="p-4">
+                        <div className="p-5">
                             <div className="flex items-center gap-4">
-                                <div className="relative w-20 h-20 flex-shrink-0">
+                                <div className="relative w-20 h-20 flex-shrink-0 rounded-xl overflow-hidden shadow-lg">
                                     <Image
                                         src={imagePreview}
                                         alt="产品图片"
                                         fill
-                                        className="rounded-lg object-cover"
+                                        className="object-cover"
                                         unoptimized
                                     />
                                     <button
                                         onClick={clearImage}
-                                        className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs hover:bg-red-600 shadow-lg"
+                                        className="absolute -top-1 -right-1 bg-gradient-to-br from-red-500 to-pink-500 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs hover:scale-110 transition-transform shadow-lg"
                                     >
                                         ×
                                     </button>
                                 </div>
                                 <div className="flex-1 min-w-0">
-                                    <p className="text-sm font-medium text-gray-800 truncate">
+                                    <p className="font-semibold text-gray-900 truncate">
                                         {result ? `已识别: ${result.productName || '产品'}` : '图片已上传'}
                                     </p>
-                                    <p className="text-xs text-gray-500">点击右上角 × 可更换图片</p>
+                                    <p className="text-sm text-gray-500 mt-0.5">点击右上角 × 可更换图片</p>
                                 </div>
                                 {!result && (
-                                    <span className="text-green-500 text-xl">✓</span>
+                                    <div className="w-8 h-8 rounded-full bg-gradient-to-br from-green-400 to-emerald-500 flex items-center justify-center shadow-lg shadow-green-200">
+                                        <span className="text-white text-sm">✓</span>
+                                    </div>
                                 )}
                             </div>
                         </div>
@@ -295,12 +345,14 @@ export default function ProductCreatePage() {
 
                 {/* Product Hint & Generate Button */}
                 {imagePreview && !result && (
-                    <div className="bg-white rounded-2xl p-6 shadow-sm space-y-4">
+                    <div className="premium-card p-6 space-y-5 animate-slide-up stagger-1">
                         <div className="flex items-start gap-3">
-                            <span className="w-6 h-6 rounded-full bg-blue-500 text-white text-sm flex items-center justify-center font-bold">2</span>
+                            <div className="w-7 h-7 rounded-full bg-gradient-to-br from-[#FF2442] to-[#FF6B6B] text-white text-sm flex items-center justify-center font-bold shadow-lg shadow-red-200">
+                                2
+                            </div>
                             <div className="flex-1">
-                                <h2 className="font-bold text-gray-800 mb-1">补充产品信息（可选）</h2>
-                                <p className="text-sm text-gray-500">帮助AI更准确地识别产品</p>
+                                <h2 className="font-bold text-gray-900 text-lg">补充产品信息（可选）</h2>
+                                <p className="text-sm text-gray-500 mt-0.5">帮助AI更准确地识别产品</p>
                             </div>
                         </div>
 
@@ -309,71 +361,74 @@ export default function ProductCreatePage() {
                             value={productHint}
                             onChange={(e) => setProductHint(e.target.value)}
                             placeholder="例如：玻尿酸面膜、无线蓝牙耳机..."
-                            className="w-full px-4 py-3 bg-gray-50 rounded-xl border border-gray-200 focus:ring-2 focus:ring-blue-400 focus:border-transparent outline-none transition-all text-gray-900"
+                            className="w-full px-5 py-4 bg-red-50/50 rounded-xl border border-red-100 focus:ring-2 focus:ring-[#FF6B6B] focus:border-transparent outline-none transition-all text-gray-900 placeholder:text-gray-400"
                         />
 
-                        <button
-                            onClick={generateContent}
-                            disabled={isGenerating}
-                            className="w-full bg-gradient-to-r from-blue-500 to-indigo-500 text-white py-4 rounded-xl font-bold text-lg shadow-lg shadow-blue-500/25 hover:shadow-blue-500/40 transition-all active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-                        >
-                            {isGenerating ? (
-                                <div className="space-y-3">
+                        {/* Generate Button */}
+                        {!isGenerating ? (
+                            <button
+                                onClick={generateContent}
+                                className="product-generate-btn w-full rounded-2xl py-4 text-lg font-bold flex items-center justify-center gap-3"
+                            >
+                                <span className="text-2xl">🚀</span>
+                                <span>生成爆款文案</span>
+                            </button>
+                        ) : (
+                            /* AI Processing Animation - 小红薯风格 */
+                            <div className="rounded-2xl bg-gradient-to-br from-[#FF2442] via-[#FF6B6B] to-[#FFB4C2] p-6 text-white animate-gradient shadow-xl shadow-red-200">
+                                <div className="text-center space-y-4">
+                                    {/* Title */}
                                     <div className="flex items-center justify-center gap-2">
-                                        <div className="w-6 h-6 rounded-full bg-gradient-to-r from-blue-500 to-indigo-500 flex items-center justify-center animate-pulse">
-                                            <span className="text-sm">✨</span>
-                                        </div>
-                                        <span className="font-bold text-blue-600">AI 正在创作...</span>
+                                        <span className="text-2xl animate-bounce-gentle">✨</span>
+                                        <span className="font-bold text-lg">小红薯 AI 正在创作...</span>
                                     </div>
 
-                                    {/* Inline sub-phase indicators */}
+                                    {/* Phase Indicators */}
                                     <div className="flex items-center justify-center gap-1 flex-wrap">
                                         {AI_PHASES.map((phase, index) => (
                                             <span key={index} className="flex items-center">
                                                 <span
-                                                    className={`text-xs px-2 py-0.5 rounded-full transition-all ${index === aiPhase
-                                                            ? 'bg-blue-500 text-white font-medium'
+                                                    className={`
+                                                        text-xs px-3 py-1.5 rounded-full transition-all duration-300
+                                                        ${index === aiPhase
+                                                            ? 'bg-white text-[#FF2442] font-bold shadow-lg scale-105'
                                                             : index < aiPhase
-                                                                ? 'bg-green-100 text-green-600'
-                                                                : 'bg-gray-100 text-gray-400'
-                                                        }`}
+                                                                ? 'bg-white/30 text-white'
+                                                                : 'bg-white/10 text-white/60'
+                                                        }
+                                                    `}
                                                 >
-                                                    {phase}
+                                                    {index < aiPhase && '✓ '}{phase}
                                                 </span>
                                                 {index < AI_PHASES.length - 1 && (
-                                                    <span className="text-gray-300 mx-0.5 text-xs">→</span>
+                                                    <span className="text-white/40 mx-1">›</span>
                                                 )}
                                             </span>
                                         ))}
                                     </div>
 
                                     {/* Progress bar */}
-                                    <div className="w-full h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                                    <div className="w-full h-2 bg-white/20 rounded-full overflow-hidden">
                                         <div
-                                            className="h-full bg-gradient-to-r from-blue-500 to-indigo-500 transition-all duration-500"
+                                            className="h-full bg-white rounded-full transition-all duration-500 progress-bar-glow"
                                             style={{ width: `${((aiPhase + 1) / AI_PHASES.length) * 100}%` }}
                                         />
                                     </div>
                                 </div>
-                            ) : (
-                                <>
-                                    <span>🚀</span>
-                                    生成爆款文案
-                                </>
-                            )}
-                        </button>
+                            </div>
+                        )}
                     </div>
                 )}
 
                 {/* Result Section */}
                 {result && (
-                    <div ref={resultRef} className="bg-white rounded-2xl p-6 shadow-sm space-y-5">
+                    <div ref={resultRef} className="premium-card p-6 space-y-5 animate-slide-up">
                         <div className="flex items-center justify-between">
-                            <h2 className="font-bold text-gray-900 flex items-center gap-2">
-                                <span className="text-lg">📝</span> 生成结果
+                            <h2 className="font-bold text-gray-900 text-lg flex items-center gap-2">
+                                <span className="text-xl">📝</span> 生成结果
                             </h2>
                             {result.productName && (
-                                <span className="text-xs bg-blue-50 text-blue-600 px-2 py-1 rounded-full">
+                                <span className="text-xs bg-gradient-to-r from-purple-100 to-pink-100 text-purple-700 px-3 py-1.5 rounded-full font-medium">
                                     识别: {result.productName}
                                 </span>
                             )}
@@ -381,7 +436,7 @@ export default function ProductCreatePage() {
 
                         {/* Title Selection */}
                         <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-2">
+                            <label className="block text-sm font-semibold text-gray-700 mb-3">
                                 选择标题
                             </label>
                             <div className="space-y-2">
@@ -389,15 +444,20 @@ export default function ProductCreatePage() {
                                     <div
                                         key={i}
                                         onClick={() => setSelectedTitle(title)}
-                                        className={`p-3 rounded-xl border cursor-pointer transition-all ${selectedTitle === title
-                                            ? 'border-blue-400 bg-blue-50'
-                                            : 'border-gray-200 hover:border-gray-300'
-                                            }`}
+                                        className={`
+                                            p-4 rounded-xl border-2 cursor-pointer transition-all duration-200
+                                            ${selectedTitle === title
+                                                ? 'border-purple-400 bg-purple-50 shadow-md'
+                                                : 'border-gray-100 hover:border-purple-200 hover:bg-gray-50'
+                                            }
+                                        `}
                                     >
                                         <div className="flex items-center justify-between">
-                                            <span className="text-sm text-gray-900">{title}</span>
+                                            <span className="text-sm text-gray-900 font-medium">{title}</span>
                                             {selectedTitle === title && (
-                                                <span className="text-blue-500 text-sm">✓</span>
+                                                <span className="w-5 h-5 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 text-white text-xs flex items-center justify-center">
+                                                    ✓
+                                                </span>
                                             )}
                                         </div>
                                     </div>
@@ -407,11 +467,11 @@ export default function ProductCreatePage() {
 
                         {/* Content */}
                         <div>
-                            <div className="flex items-center justify-between mb-2">
-                                <label className="text-sm font-medium text-gray-700">文案内容</label>
-                                <span className="text-xs text-gray-400">{result.content.length} 字</span>
+                            <div className="flex items-center justify-between mb-3">
+                                <label className="text-sm font-semibold text-gray-700">文案内容</label>
+                                <span className="text-xs text-gray-400 bg-gray-100 px-2 py-1 rounded-full">{result.content.length} 字</span>
                             </div>
-                            <div className="p-4 bg-gray-50 rounded-xl border border-gray-200 max-h-60 overflow-y-auto">
+                            <div className="p-5 bg-gradient-to-br from-gray-50 to-gray-100/50 rounded-xl border border-gray-100 max-h-60 overflow-y-auto">
                                 <pre className="text-sm text-gray-800 whitespace-pre-wrap font-sans leading-relaxed">
                                     {result.content}
                                 </pre>
@@ -420,13 +480,13 @@ export default function ProductCreatePage() {
 
                         {/* Tags */}
                         <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-2">推荐标签（点击可复制）</label>
+                            <label className="block text-sm font-semibold text-gray-700 mb-3">推荐标签（点击可复制）</label>
                             <div className="flex flex-wrap gap-2">
                                 {result.tags.map((tag, i) => (
                                     <button
                                         key={i}
                                         onClick={() => copyToClipboard(`#${tag}`, `#${tag} 已复制`)}
-                                        className="px-3 py-1 bg-blue-50 text-blue-600 text-sm rounded-full hover:bg-blue-100 transition-colors cursor-pointer active:scale-95"
+                                        className="px-4 py-2 bg-gradient-to-r from-purple-50 to-pink-50 text-purple-700 text-sm rounded-full hover:from-purple-100 hover:to-pink-100 transition-all cursor-pointer active:scale-95 font-medium border border-purple-100"
                                     >
                                         #{tag}
                                     </button>
@@ -438,15 +498,15 @@ export default function ProductCreatePage() {
                         <div className="pt-2 space-y-3">
                             <button
                                 onClick={() => copyToClipboard(getFullContent())}
-                                className="w-full bg-gradient-to-r from-green-500 to-emerald-500 text-white py-4 rounded-xl font-bold text-lg shadow-lg shadow-green-500/25 hover:shadow-green-500/40 transition-all active:scale-[0.98] flex items-center justify-center gap-2"
+                                className="product-generate-btn w-full rounded-2xl py-4 text-lg font-bold flex items-center justify-center gap-3"
                             >
-                                <span>✨</span>
+                                <span className="text-xl">✨</span>
                                 一键复制全部内容
                             </button>
 
                             {/* Copy Feedback */}
                             {copyFeedback && (
-                                <div className="text-center text-sm text-green-600 font-medium animate-bounce">
+                                <div className="text-center text-sm text-green-600 font-semibold animate-bounce-gentle">
                                     {copyFeedback}
                                 </div>
                             )}
@@ -460,11 +520,21 @@ export default function ProductCreatePage() {
                         <button
                             onClick={generateContent}
                             disabled={isGenerating}
-                            className="w-full bg-gray-100 text-gray-700 py-3 rounded-xl font-medium hover:bg-gray-200 transition-colors flex items-center justify-center gap-2"
+                            className="w-full bg-gray-100 hover:bg-gray-200 text-gray-700 py-4 rounded-xl font-semibold transition-all flex items-center justify-center gap-2"
                         >
                             <span>🔄</span>
                             重新生成
                         </button>
+                    </div>
+                )}
+
+                {/* AI Product Image Generator */}
+                {result && imagePreview && (
+                    <div className="animate-slide-up stagger-2">
+                        <ProductImageGenerator
+                            productImage={imagePreview}
+                            productName={result.productName}
+                        />
                     </div>
                 )}
             </main>

@@ -1,12 +1,20 @@
 {
-    "users": [
-        {
-            "id": "1",
-            "username": "demo",
-            "password": "demo123",
-            "name": "演示用户",
-            "createdAt": "2026-01-10T00:00:00Z",
-            "enabled": true
-        }
-    ]
+  "users": [
+    {
+      "id": "1",
+      "username": "demo",
+      "password": "demo123",
+      "name": "演示用户",
+      "createdAt": "2026-01-10T00:00:00Z",
+      "enabled": true
+    },
+    {
+      "username": "bopii66",
+      "password": "bopii66",
+      "name": "bopii66",
+      "enabled": true,
+      "id": "1769423330348",
+      "createdAt": "2026-01-26T10:28:50.348Z"
+    }
+  ]
 }
