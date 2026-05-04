@@ -1,0 +1,10 @@
+node_modules/
+dist/
+*.png
+*.log
+ppt-media/
+ppt-media-contact.jpg
+assets/
+proof/
+xhs-covers/
+avatar.jpg
