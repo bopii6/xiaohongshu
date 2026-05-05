@@ -1,0 +1,11 @@
+{
+  "scripts": {
+    "build": "vite build",
+    "dev": "vite --host 127.0.0.1 --port 5175",
+    "preview": "vite --host 127.0.0.1 --port 5175"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "vite": "latest"
+  }
+}

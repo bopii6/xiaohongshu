@@ -1,0 +1,11 @@
+node_modules/
+dist/
+*.png
+!public/hero-device.png
+*.log
+ppt-media/
+ppt-media-contact.jpg
+assets/
+proof/
+xhs-covers/
+avatar.jpg
